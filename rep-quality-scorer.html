@@ -170,6 +170,10 @@
       <div class="num" id="summaryNum">—</div>
       <div class="lbl" id="summaryLbl">no reps yet</div>
     </div>
+    <div class="sub-scores" style="margin-top:10px;">
+      <div class="sub-score"><span class="k">avg smooth</span><span class="v" id="summarySmooth">—</span></div>
+      <div class="sub-score"><span class="k">avg control</span><span class="v" id="summaryControl">—</span></div>
+    </div>
   </div>
 
   <div class="panel">
@@ -449,11 +453,25 @@ function createEngine(opts) {
 
   function updateSummary() {
     const reps = engine.getReps();
-    if (reps.length === 0) { summaryNum.textContent = '—'; summaryLbl.textContent = 'no reps yet'; return; }
+    if (reps.length === 0) {
+      summaryNum.textContent = '—'; summaryLbl.textContent = 'no reps yet';
+      document.getElementById('summarySmooth').textContent = '—';
+      document.getElementById('summaryControl').textContent = '—';
+      return;
+    }
     const avg = reps.reduce((a,r)=>a+r.composite,0) / reps.length;
     summaryNum.textContent = avg.toFixed(0);
     summaryNum.className = 'num ' + scoreClass(avg);
     summaryLbl.textContent = reps.length + (reps.length === 1 ? ' rep' : ' reps') + ' this set';
+
+    const avgSmooth = reps.reduce((a,r)=>a+r.smoothScore,0) / reps.length;
+    const avgControl = reps.reduce((a,r)=>a+r.controlScore,0) / reps.length;
+    const smoothEl = document.getElementById('summarySmooth');
+    const controlEl = document.getElementById('summaryControl');
+    smoothEl.textContent = avgSmooth.toFixed(0);
+    smoothEl.className = 'v ' + scoreClass(avgSmooth);
+    controlEl.textContent = avgControl.toFixed(0);
+    controlEl.className = 'v ' + scoreClass(avgControl);
   }
 
   function tick() {
@@ -623,6 +641,8 @@ function createEngine(opts) {
     liveVLoss.textContent = '—';
     repList.innerHTML = '<div class="empty-note">Reps will appear here as you complete them.</div>';
     summaryNum.textContent = '—'; summaryLbl.textContent = 'no reps yet';
+    document.getElementById('summarySmooth').textContent = '—';
+    document.getElementById('summaryControl').textContent = '—';
     stopSetBtn.style.display = 'none';
     startSetBtn.style.display = 'block';
     startSetBtn.disabled = !sensorsReady;
