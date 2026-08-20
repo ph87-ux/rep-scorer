@@ -1,0 +1,520 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>Rep Quality Scorer</title>
+<style>
+  :root {
+    --bg: #0a0d0c;
+    --panel: #121716;
+    --line: #232a28;
+    --ink: #eef2f0;
+    --dim: #6b7a76;
+    --accent: #7de08d;
+    --accent-dim: #2f4a37;
+    --warn: #f0a860;
+    --bad: #ff6b5e;
+    --mono: 'SF Mono', Menlo, Consolas, monospace;
+  }
+  * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+  html, body { margin:0; padding:0; background:var(--bg); color:var(--ink);
+    font-family:-apple-system,BlinkMacSystemFont,'SF Pro Text',sans-serif; min-height:100vh; }
+  .wrap { max-width:480px; margin:0 auto; padding:20px 16px 60px; }
+
+  header { display:flex; align-items:baseline; justify-content:space-between;
+    border-bottom:1px solid var(--line); padding-bottom:12px; margin-bottom:16px; }
+  .brand { font-family:var(--mono); font-size:10px; letter-spacing:.14em; color:var(--dim); text-transform:uppercase; }
+  h1 { font-size:19px; font-weight:600; letter-spacing:-.01em; margin:3px 0 0; }
+  .status-dot { width:8px; height:8px; border-radius:50%; background:var(--dim); display:inline-block; margin-right:6px; }
+  .status-dot.live { background:var(--accent); box-shadow:0 0 8px var(--accent); animation:pulse 1.4s ease-in-out infinite; }
+  @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:.5} }
+  .status-row { font-family:var(--mono); font-size:10px; color:var(--dim); text-align:right; }
+
+  .panel { background:var(--panel); border:1px solid var(--line); border-radius:12px; padding:16px; margin-bottom:12px; }
+  .panel-title { font-family:var(--mono); font-size:10px; letter-spacing:.1em; text-transform:uppercase; color:var(--dim); margin-bottom:12px; }
+
+  .tempo-grid { display:grid; grid-template-columns:1fr 1fr 1fr 1fr; gap:8px; }
+  .tempo-field { text-align:center; }
+  .tempo-field label { display:block; font-size:9px; color:var(--dim); margin-bottom:4px; font-family:var(--mono); }
+  .tempo-field input { width:100%; background:#0a0d0c; border:1px solid var(--line); color:var(--ink);
+    border-radius:6px; padding:8px 4px; text-align:center; font-family:var(--mono); font-size:14px; }
+
+  .btn { width:100%; padding:15px; border:none; border-radius:10px; font-size:15px; font-weight:600;
+    letter-spacing:-.01em; cursor:pointer; margin-bottom:10px; }
+  .btn-primary { background:var(--accent); color:#0a0d0c; }
+  .btn-stop { background:var(--bad); color:#0a0d0c; }
+  .btn-ghost { background:transparent; border:1px solid var(--line); color:var(--dim); }
+  .btn:active { transform:scale(0.98); }
+  .btn:disabled { opacity:0.35; }
+
+  .err { background:rgba(240,168,96,.1); border:1px solid var(--warn); color:var(--warn);
+    padding:12px 14px; border-radius:8px; font-size:13px; margin-bottom:14px; display:none; }
+
+  .live-row { display:flex; gap:10px; margin-bottom:2px; }
+  .live-box { flex:1; background:#0a0d0c; border:1px solid var(--line); border-radius:8px; padding:10px; text-align:center; }
+  .live-box .lbl { font-family:var(--mono); font-size:9px; color:var(--dim); text-transform:uppercase; letter-spacing:.08em; }
+  .live-box .val { font-family:var(--mono); font-size:16px; font-weight:700; margin-top:4px; }
+  .phase-moving { color:var(--accent); }
+  .phase-paused { color:var(--warn); }
+  .phase-idle { color:var(--dim); }
+
+  .summary-score { text-align:center; padding:6px 0 4px; }
+  .summary-score .num { font-family:var(--mono); font-size:48px; font-weight:700; line-height:1; }
+  .summary-score .lbl { font-size:12px; color:var(--dim); margin-top:6px; }
+
+  .rep-card { background:#0a0d0c; border:1px solid var(--line); border-radius:10px; padding:12px 14px; margin-bottom:8px; }
+  .rep-card-top { display:flex; justify-content:space-between; align-items:baseline; margin-bottom:8px; }
+  .rep-num { font-family:var(--mono); font-size:11px; color:var(--dim); }
+  .rep-composite { font-family:var(--mono); font-size:20px; font-weight:700; }
+  .sub-scores { display:grid; grid-template-columns:1fr 1fr; gap:6px; }
+  .sub-score { display:flex; justify-content:space-between; font-size:11px; }
+  .sub-score .k { color:var(--dim); font-family:var(--mono); }
+  .sub-score .v { font-family:var(--mono); font-weight:600; }
+
+  .score-good { color:var(--accent); }
+  .score-mid { color:var(--warn); }
+  .score-bad { color:var(--bad); }
+
+  .empty-note { color:var(--dim); font-size:12px; text-align:center; padding:12px 0; }
+  footer { text-align:center; font-family:var(--mono); font-size:9px; color:var(--dim); margin-top:20px; letter-spacing:.04em; }
+
+  .alert-banner { background:var(--bad); color:#1a0705; font-weight:700; font-size:13px;
+    text-align:center; padding:12px; border-radius:10px; margin-bottom:12px; }
+
+  .flash-overlay { position:fixed; inset:0; background:var(--bad); opacity:0; pointer-events:none; z-index:999; }
+  .flash-overlay.on { animation:flashPulse 0.6s ease-out; }
+  @keyframes flashPulse { 0%{opacity:0.85} 100%{opacity:0} }
+
+  .vloss-tag { grid-column:span 2; }
+</style>
+</head>
+<body>
+<div class="flash-overlay" id="flashOverlay"></div>
+<div class="wrap">
+
+  <header>
+    <div>
+      <div class="brand">Prototype · V1</div>
+      <h1>Rep Quality Scorer</h1>
+    </div>
+    <div class="status-row">
+      <div><span class="status-dot" id="statusDot"></span><span id="statusText">idle</span></div>
+      <div id="axisText">axis —</div>
+    </div>
+  </header>
+
+  <button class="btn btn-primary" id="permitBtn">Enable Motion Access</button>
+  <div class="err" id="errBox"></div>
+
+  <div class="panel">
+    <div class="panel-title">Target Tempo (seconds)</div>
+    <div class="tempo-grid">
+      <div class="tempo-field"><label>Phase 1</label><input type="number" id="t1" value="4" step="0.5" min="0.5"></div>
+      <div class="tempo-field"><label>Pause 1</label><input type="number" id="p1" value="2" step="0.5" min="0"></div>
+      <div class="tempo-field"><label>Phase 2</label><input type="number" id="t2" value="4" step="0.5" min="0.5"></div>
+      <div class="tempo-field"><label>Pause 2</label><input type="number" id="p2" value="2" step="0.5" min="0"></div>
+    </div>
+  </div>
+
+  <div class="panel">
+    <div class="panel-title">Velocity-Loss Cutoff (VBT)</div>
+    <div class="tempo-grid" style="grid-template-columns:1fr 1fr;">
+      <div class="tempo-field">
+        <label>Baseline cadence tol.</label>
+        <input type="number" id="cadTol" value="0.75" step="0.25" min="0.25" max="2">
+      </div>
+      <div class="tempo-field"><label>Stop at loss %</label><input type="number" id="vlThresh" value="25" step="1" min="10" max="50"></div>
+    </div>
+    <div style="font-size:11px;color:var(--dim);margin-top:8px;line-height:1.4;">Phase 1 = concentric. Baseline locks to the first rep whose Phase 1 duration lands within the tolerance of your Phase 1 target — not necessarily rep 1.</div>
+  </div>
+
+  <button class="btn btn-primary" id="startSetBtn" disabled>Start Set</button>
+  <button class="btn btn-stop" id="stopSetBtn" style="display:none">Stop Set</button>
+  <button class="btn btn-ghost" id="resetBtn">Reset</button>
+
+  <div class="panel">
+    <div class="panel-title">Live</div>
+    <div class="live-row">
+      <div class="live-box"><div class="lbl">Phase</div><div class="val phase-idle" id="livePhase">idle</div></div>
+      <div class="live-box"><div class="lbl">Rep</div><div class="val" id="liveRep">0</div></div>
+      <div class="live-box"><div class="lbl">Vel. Loss</div><div class="val" id="liveVLoss">—</div></div>
+    </div>
+  </div>
+
+  <div class="alert-banner" id="alertBanner" style="display:none">⚠ VELOCITY LOSS THRESHOLD REACHED — CONSIDER ENDING SET</div>
+
+  <div class="panel">
+    <div class="panel-title">Set Summary</div>
+    <div class="summary-score">
+      <div class="num" id="summaryNum">—</div>
+      <div class="lbl" id="summaryLbl">no reps yet</div>
+    </div>
+  </div>
+
+  <div class="panel">
+    <div class="panel-title">Reps</div>
+    <div id="repList"><div class="empty-note">Reps will appear here as you complete them.</div></div>
+  </div>
+
+  <footer>Runs entirely on-device · mount phone rigidly to the stack carrier · v1 thresholds will need tuning against real reps</footer>
+</div>
+
+<script>
+// ---------- Rep detection + scoring engine ----------
+function createEngine(opts) {
+  const cfg = Object.assign({
+    vThresh: 0.05, aThresh: 0.3, pauseHoldMs: 120, lpAlpha: 0.25,
+    phase1Target: 4, pause1Target: 2, phase2Target: 4, pause2Target: 2,
+    tempoTolerance: 0.6
+  }, opts || {});
+
+  let state = 'idle';
+  let vFilt = 0, aFilt = 0, v = 0, lastT = null, lastA = 0;
+  let belowSince = null, phaseStartT = null, phaseSamples = [];
+  let completedPhases = [], reps = [], romHistory = [], maxAbsA = 0.001;
+
+  function finishPhase(tNow) {
+    if (phaseSamples.length < 2) { phaseSamples = []; return null; }
+    const duration = (tNow - phaseStartT) / 1000;
+    let pos = 0, peakAbsV = 0, jerkSq = 0, jerkN = 0;
+    for (let i = 1; i < phaseSamples.length; i++) {
+      const s0 = phaseSamples[i-1], s1 = phaseSamples[i];
+      const dt = (s1.t - s0.t) / 1000;
+      if (dt <= 0) continue;
+      pos += (s0.v + s1.v) / 2 * dt;
+      peakAbsV = Math.max(peakAbsV, Math.abs(s1.v));
+      const jerk = (s1.a - s0.a) / dt;
+      jerkSq += jerk * jerk; jerkN++;
+    }
+    const jerkRms = jerkN ? Math.sqrt(jerkSq / jerkN) : 0;
+    const endWindow = phaseSamples.filter(s => (tNow - s.t) <= 150);
+    const endAbsA = endWindow.length
+      ? endWindow.reduce((a,s)=>a+Math.abs(s.a),0)/endWindow.length
+      : Math.abs(phaseSamples[phaseSamples.length-1].a);
+    const dir = pos >= 0 ? 1 : -1;
+    phaseSamples = [];
+    return { duration, rom: Math.abs(pos), peakAbsV, jerkRms, endAbsA, dir };
+  }
+
+  function scoreFromError(actual, target, tolerance) {
+    const err = Math.abs(actual - target);
+    return Math.max(0, 100 - (err / tolerance) * 100);
+  }
+
+  function packageRep(p1, p2) {
+    const romAvg = (p1.rom + p2.rom) / 2;
+    let romScore;
+    if (romHistory.length === 0) romScore = 100;
+    else {
+      const baseline = romHistory.reduce((a,b)=>a+b,0) / romHistory.length;
+      const tolerance = Math.max(0.001, baseline * 0.15);
+      romScore = scoreFromError(romAvg, baseline, tolerance);
+    }
+    romHistory.push(romAvg);
+
+    const tempoScore = (
+      scoreFromError(p1.duration, cfg.phase1Target, cfg.tempoTolerance) +
+      scoreFromError(p2.duration, cfg.phase2Target, cfg.tempoTolerance)
+    ) / 2;
+
+    const jerkScoreOf = (p) => {
+      const ratio = p.jerkRms / (maxAbsA / Math.max(p.duration, 0.05) + 0.001);
+      return Math.max(0, 100 - Math.min(100, ratio * 8));
+    };
+    const smoothScore = (jerkScoreOf(p1) + jerkScoreOf(p2)) / 2;
+
+    const controlScoreOf = (p) => {
+      const ratio = p.endAbsA / (maxAbsA + 0.001);
+      return Math.max(0, 100 - Math.min(100, ratio * 100));
+    };
+    const controlScore = (controlScoreOf(p1) + controlScoreOf(p2)) / 2;
+
+    const composite = romScore*0.25 + tempoScore*0.25 + smoothScore*0.25 + controlScore*0.25;
+    return { romScore, tempoScore, smoothScore, controlScore, composite,
+      phase1Duration: p1.duration, phase2Duration: p2.duration,
+      phase1PeakV: p1.peakAbsV, phase2PeakV: p2.peakAbsV };
+  }
+
+  function ingest(t, aRaw) {
+    if (lastT === null) { lastT = t; lastA = aRaw; aFilt = aRaw; return; }
+    const dt = (t - lastT) / 1000;
+    if (dt <= 0) return;
+    aFilt = aFilt + cfg.lpAlpha * (aRaw - aFilt);
+    maxAbsA = Math.max(maxAbsA, Math.abs(aFilt));
+    v = v + (lastA + aFilt) / 2 * dt;
+    vFilt = vFilt + cfg.lpAlpha * (v - vFilt);
+
+    const atRest = Math.abs(vFilt) < cfg.vThresh && Math.abs(aFilt) < cfg.aThresh;
+
+    if (atRest) {
+      if (belowSince === null) belowSince = t;
+      if (t - belowSince >= cfg.pauseHoldMs && state === 'moving') {
+        v = 0; vFilt = 0;
+        const phase = finishPhase(t);
+        if (phase) {
+          completedPhases.push(phase);
+          if (completedPhases.length >= 2) {
+            const p2 = completedPhases.pop();
+            const p1 = completedPhases.pop();
+            reps.push(packageRep(p1, p2));
+          }
+        }
+        state = 'paused';
+      }
+    } else {
+      belowSince = null;
+      if (state !== 'moving') { state = 'moving'; phaseStartT = t; phaseSamples = []; }
+    }
+    if (state === 'moving') phaseSamples.push({ t, v: vFilt, a: aFilt });
+    lastT = t; lastA = aFilt;
+  }
+
+  return { ingest, getReps: () => reps, getState: () => state };
+}
+
+// ---------- UI wiring ----------
+(function() {
+  const statusDot = document.getElementById('statusDot');
+  const statusText = document.getElementById('statusText');
+  const axisText = document.getElementById('axisText');
+  const permitBtn = document.getElementById('permitBtn');
+  const startSetBtn = document.getElementById('startSetBtn');
+  const stopSetBtn = document.getElementById('stopSetBtn');
+  const resetBtn = document.getElementById('resetBtn');
+  const errBox = document.getElementById('errBox');
+  const livePhase = document.getElementById('livePhase');
+  const liveRep = document.getElementById('liveRep');
+  const summaryNum = document.getElementById('summaryNum');
+  const summaryLbl = document.getElementById('summaryLbl');
+  const repList = document.getElementById('repList');
+
+  let engine = null;
+  let sensorsReady = false;
+  let setActive = false;
+  let axisPicked = null;
+  let calibBuffer = { x: [], y: [], z: [] };
+  let calibDeadline = 0;
+  let lastRepsCount = 0;
+  let baselinePeakV = null;
+  let audioCtx = null;
+  const flashOverlay = document.getElementById('flashOverlay');
+  const alertBanner = document.getElementById('alertBanner');
+  const liveVLoss = document.getElementById('liveVLoss');
+
+  function unlockAudio() {
+    if (!audioCtx) {
+      try { audioCtx = new (window.AudioContext || window.webkitAudioContext)(); }
+      catch (e) { audioCtx = null; }
+    } else if (audioCtx.state === 'suspended') {
+      audioCtx.resume();
+    }
+  }
+
+  function beep(freq, startTime, duration) {
+    if (!audioCtx) return;
+    const osc = audioCtx.createOscillator();
+    const gain = audioCtx.createGain();
+    osc.type = 'square';
+    osc.frequency.value = freq;
+    gain.gain.setValueAtTime(0.25, startTime);
+    gain.gain.exponentialRampToValueAtTime(0.001, startTime + duration);
+    osc.connect(gain).connect(audioCtx.destination);
+    osc.start(startTime);
+    osc.stop(startTime + duration);
+  }
+
+  function triggerStopAlert() {
+    // Audio: three sharp beeps — reliable on iOS Safari
+    if (audioCtx) {
+      const now = audioCtx.currentTime;
+      beep(880, now, 0.18);
+      beep(880, now + 0.25, 0.18);
+      beep(880, now + 0.5, 0.18);
+    }
+    // Visual: full-screen flash
+    flashOverlay.classList.remove('on'); void flashOverlay.offsetWidth; flashOverlay.classList.add('on');
+    // Haptic: attempt only — no effect on iOS Safari today, works if this ever runs on Android
+    if ('vibrate' in navigator) { try { navigator.vibrate([200,100,200,100,200]); } catch(e) {} }
+    alertBanner.style.display = 'block';
+  }
+
+  function showError(msg) { errBox.style.display = 'block'; errBox.textContent = msg; }
+
+  function scoreClass(v) { return v >= 80 ? 'score-good' : (v >= 55 ? 'score-mid' : 'score-bad'); }
+
+  function renderRep(r, idx, vLossPct) {
+    const div = document.createElement('div');
+    div.className = 'rep-card';
+    const vLossStr = (vLossPct === null) ? 'baseline pending' : vLossPct.toFixed(0) + '%';
+    const vLossClass = (vLossPct === null) ? '' : (vLossPct >= parseFloat(document.getElementById('vlThresh').value) ? 'score-bad' : (vLossPct >= 10 ? 'score-mid' : 'score-good'));
+    div.innerHTML = `
+      <div class="rep-card-top">
+        <div class="rep-num">REP ${idx}</div>
+        <div class="rep-composite ${scoreClass(r.composite)}">${r.composite.toFixed(0)}</div>
+      </div>
+      <div class="sub-scores">
+        <div class="sub-score"><span class="k">rom</span><span class="v ${scoreClass(r.romScore)}">${r.romScore.toFixed(0)}</span></div>
+        <div class="sub-score"><span class="k">tempo</span><span class="v ${scoreClass(r.tempoScore)}">${r.tempoScore.toFixed(0)}</span></div>
+        <div class="sub-score"><span class="k">smooth</span><span class="v ${scoreClass(r.smoothScore)}">${r.smoothScore.toFixed(0)}</span></div>
+        <div class="sub-score"><span class="k">control</span><span class="v ${scoreClass(r.controlScore)}">${r.controlScore.toFixed(0)}</span></div>
+        <div class="sub-score vloss-tag"><span class="k">velocity loss</span><span class="v ${vLossClass}">${vLossStr}</span></div>
+      </div>`;
+    repList.prepend(div);
+  }
+
+  function updateSummary() {
+    const reps = engine.getReps();
+    if (reps.length === 0) { summaryNum.textContent = '—'; summaryLbl.textContent = 'no reps yet'; return; }
+    const avg = reps.reduce((a,r)=>a+r.composite,0) / reps.length;
+    summaryNum.textContent = avg.toFixed(0);
+    summaryNum.className = 'num ' + scoreClass(avg);
+    summaryLbl.textContent = reps.length + (reps.length === 1 ? ' rep' : ' reps') + ' this set';
+  }
+
+  function tick() {
+    if (!setActive || !engine) return;
+    const st = engine.getState();
+    livePhase.textContent = st;
+    livePhase.className = 'val ' + (st === 'moving' ? 'phase-moving' : st === 'paused' ? 'phase-paused' : 'phase-idle');
+    const reps = engine.getReps();
+    liveRep.textContent = reps.length;
+    if (reps.length > lastRepsCount) {
+      const vlThresh = parseFloat(document.getElementById('vlThresh').value) || 25;
+      const phase1TargetVal = parseFloat(document.getElementById('t1').value) || 4;
+      const cadTol = parseFloat(document.getElementById('cadTol').value) || 0.75;
+      for (let i = lastRepsCount; i < reps.length; i++) {
+        const r = reps[i];
+        const peakV = r.phase1PeakV; // Phase 1 = concentric, fixed
+        let vLossPct = null;
+        if (baselinePeakV === null) {
+          const cadenceOk = Math.abs(r.phase1Duration - phase1TargetVal) <= cadTol;
+          if (cadenceOk && peakV > 0) {
+            baselinePeakV = peakV;
+            vLossPct = 0;
+          }
+          // else: no baseline yet — this rep's cadence was off, wait for a clean one
+        } else if (baselinePeakV > 0) {
+          vLossPct = Math.max(0, (baselinePeakV - peakV) / baselinePeakV * 100);
+        }
+        renderRep(r, i+1, vLossPct);
+        liveVLoss.textContent = (vLossPct === null) ? (baselinePeakV === null ? 'wait' : '—') : vLossPct.toFixed(0) + '%';
+        liveVLoss.className = 'val ' + (vLossPct !== null && vLossPct >= vlThresh ? 'phase-paused' : '');
+        if (vLossPct !== null && vLossPct >= vlThresh) triggerStopAlert();
+      }
+      lastRepsCount = reps.length;
+      updateSummary();
+      if (repList.querySelector('.empty-note')) repList.querySelector('.empty-note').remove();
+    }
+    requestAnimationFrame(tick);
+  }
+
+  function handleMotion(e) {
+    const acc = e.acceleration && (e.acceleration.x !== null) ? e.acceleration : e.accelerationIncludingGravity;
+    if (!acc) return;
+    const t = performance.now();
+
+    if (axisPicked === null) {
+      calibBuffer.x.push(acc.x || 0);
+      calibBuffer.y.push(acc.y || 0);
+      calibBuffer.z.push(acc.z || 0);
+      if (t < calibDeadline) return;
+      const variance = (arr) => { const m = arr.reduce((a,b)=>a+b,0)/arr.length; return arr.reduce((a,b)=>a+(b-m)*(b-m),0)/arr.length; };
+      const vx = variance(calibBuffer.x), vy = variance(calibBuffer.y), vz = variance(calibBuffer.z);
+      axisPicked = vx >= vy && vx >= vz ? 'x' : (vy >= vz ? 'y' : 'z');
+      axisText.textContent = 'axis ' + axisPicked.toUpperCase();
+      return;
+    }
+
+    const aVal = acc[axisPicked] || 0;
+    engine.ingest(t, aVal);
+  }
+
+  permitBtn.addEventListener('click', function() {
+    // Diagnose the environment first — these are the actual reasons iOS blocks motion access.
+    const inIframe = (function(){ try { return window.self !== window.top; } catch(e) { return true; } })();
+    const isSecure = window.isSecureContext === true;
+
+    if (inIframe) {
+      showError('This page is running inside an embedded preview (an iframe), which iOS blocks from requesting Motion & Fitness access — that\'s why nothing shows up in Settings. Open this exact file directly in Safari as its own tab (not inside another app\'s preview) and try again.');
+      return;
+    }
+    if (!isSecure) {
+      showError('This page isn\'t loaded over a secure (https) connection, which iOS requires for motion sensors. Local files and some previews don\'t count — open it as a real https:// page in Safari.');
+      return;
+    }
+
+    const needsPermission = typeof DeviceMotionEvent !== 'undefined' && typeof DeviceMotionEvent.requestPermission === 'function';
+    function goLive() {
+      sensorsReady = true;
+      statusDot.classList.add('live');
+      statusText.textContent = 'ready';
+      permitBtn.style.display = 'none';
+      startSetBtn.disabled = false;
+      window.addEventListener('devicemotion', handleMotion);
+    }
+    if (needsPermission) {
+      DeviceMotionEvent.requestPermission().then(function(r) {
+        if (r === 'granted') goLive();
+        else showError('Motion access denied. Enable in Settings → Safari → Motion & Orientation Access, then reload.');
+      }).catch(function(err){ showError('Could not request motion access: ' + err.message); });
+    } else if (typeof DeviceMotionEvent !== 'undefined') {
+      goLive();
+    } else {
+      showError('This browser does not support motion sensors, or they are unavailable in this context.');
+    }
+  });
+
+  startSetBtn.addEventListener('click', function() {
+    if (!sensorsReady) return;
+    unlockAudio();
+    baselinePeakV = null;
+    alertBanner.style.display = 'none';
+    liveVLoss.textContent = '—';
+    engine = createEngine({
+      phase1Target: parseFloat(document.getElementById('t1').value) || 4,
+      pause1Target: parseFloat(document.getElementById('p1').value) || 2,
+      phase2Target: parseFloat(document.getElementById('t2').value) || 4,
+      pause2Target: parseFloat(document.getElementById('p2').value) || 2,
+    });
+    axisPicked = null;
+    calibBuffer = { x: [], y: [], z: [] };
+    calibDeadline = performance.now() + 1500;
+    lastRepsCount = 0;
+    setActive = true;
+    repList.innerHTML = '<div class="empty-note">Calibrating axis — move through one rep now…</div>';
+    summaryNum.textContent = '—'; summaryLbl.textContent = 'no reps yet';
+    statusText.textContent = 'recording';
+    startSetBtn.style.display = 'none';
+    stopSetBtn.style.display = 'block';
+    requestAnimationFrame(tick);
+  });
+
+  stopSetBtn.addEventListener('click', function() {
+    setActive = false;
+    statusText.textContent = 'stopped';
+    stopSetBtn.style.display = 'none';
+    startSetBtn.style.display = 'block';
+    if (repList.children.length === 0) repList.innerHTML = '<div class="empty-note">No reps detected this set.</div>';
+  });
+
+  resetBtn.addEventListener('click', function() {
+    setActive = false;
+    engine = null;
+    axisPicked = null;
+    axisText.textContent = 'axis —';
+    lastRepsCount = 0;
+    baselinePeakV = null;
+    alertBanner.style.display = 'none';
+    liveVLoss.textContent = '—';
+    repList.innerHTML = '<div class="empty-note">Reps will appear here as you complete them.</div>';
+    summaryNum.textContent = '—'; summaryLbl.textContent = 'no reps yet';
+    stopSetBtn.style.display = 'none';
+    startSetBtn.style.display = 'block';
+    startSetBtn.disabled = !sensorsReady;
+    statusText.textContent = sensorsReady ? 'ready' : 'idle';
+  });
+})();
+</script>
+</body>
+</html>
