@@ -145,7 +145,6 @@
 
   <button class="btn btn-primary" id="startSetBtn" disabled>Start Set</button>
   <button class="btn btn-stop" id="stopSetBtn" style="display:none">Stop Set</button>
-  <button class="btn btn-ghost" id="downloadLogBtn" style="display:none">Download Log (for tuning)</button>
   <button class="btn btn-ghost" id="resetBtn">Reset</button>
 
   <div class="panel">
@@ -169,11 +168,11 @@
       <div class="tempo-field"><label>Pause hold (ms)</label><input type="number" id="pauseHoldIn" value="300" step="25" min="150"></div>
     </div>
     <div class="live-row" style="margin-top:10px;">
-      <div class="live-box"><div class="lbl">aFilt</div><div class="val" id="dbgA" style="font-size:13px">—</div></div>
-      <div class="live-box"><div class="lbl">vFilt</div><div class="val" id="dbgV" style="font-size:13px">—</div></div>
+      <div class="live-box"><div class="lbl">aFilt (peak)</div><div class="val" id="dbgA" style="font-size:13px">—</div><div style="font-size:10px;color:var(--dim);margin-top:2px;" id="dbgAPeak">peak —</div></div>
+      <div class="live-box"><div class="lbl">vFilt (peak)</div><div class="val" id="dbgV" style="font-size:13px">—</div><div style="font-size:10px;color:var(--dim);margin-top:2px;" id="dbgVPeak">peak —</div></div>
       <div class="live-box"><div class="lbl">At Rest</div><div class="val" id="dbgRest" style="font-size:13px">—</div></div>
     </div>
-    <div style="font-size:11px;color:var(--dim);margin-top:8px;line-height:1.4;">Velocity is now judged relative to each phase's own peak, so it adapts automatically to slow/light vs fast/heavy reps. Accel thresh still matters — if reps are missed, raise it slightly; if slow reps split into false extra reps, lower it slightly.</div>
+    <div style="font-size:11px;color:var(--dim);margin-top:8px;line-height:1.4;">The top number updates every frame and will flicker with sensor noise — read the smaller "peak" number underneath instead, which holds the highest value briefly before decaying, so it's actually readable while lifting. Velocity is now judged relative to each phase's own peak, so it adapts automatically to slow/light vs fast/heavy reps. Accel thresh still matters — if reps are missed, raise it slightly; if slow reps split into false extra reps, lower it slightly.</div>
   </div>
 
   <div class="alert-banner" id="alertBanner" style="display:none">⚠ VELOCITY LOSS THRESHOLD REACHED — CONSIDER ENDING SET</div>
@@ -340,7 +339,6 @@ function createEngine(opts) {
   const permitBtn = document.getElementById('permitBtn');
   const startSetBtn = document.getElementById('startSetBtn');
   const stopSetBtn = document.getElementById('stopSetBtn');
-  const downloadLogBtn = document.getElementById('downloadLogBtn');
   const resetBtn = document.getElementById('resetBtn');
   const errBox = document.getElementById('errBox');
   const livePhase = document.getElementById('livePhase');
@@ -361,7 +359,11 @@ function createEngine(opts) {
   let gravityEst = null; // slow-tracking gravity estimate per axis — computed ourselves, not trusted from the browser
   const GRAVITY_ALPHA = 0.04; // gated to pauses only now, so can track a bit faster
   let velHistory = [];
-  let logBuffer = [];
+  // Peak-hold meters for the debug readout: jump instantly to a new peak,
+  // then decay — same idea as a VU meter — so the number is actually
+  // readable while lifting, instead of the raw per-frame value flickering.
+  let aPeakHold = 0, vPeakHold = 0;
+  const PEAK_HOLD_DECAY = 0.94; // per animation frame, ~0.5-1s to fall back to zero
   const VEL_WINDOW_MS = 6000;
   const velCanvas = document.getElementById('velCanvas');
   const velCtx = velCanvas.getContext('2d');
@@ -510,6 +512,10 @@ function createEngine(opts) {
     const dbg = engine.getDebug();
     document.getElementById('dbgA').textContent = dbg.aFilt.toFixed(3);
     document.getElementById('dbgV').textContent = dbg.vFilt.toFixed(3);
+    aPeakHold = Math.max(Math.abs(dbg.aFilt), aPeakHold * PEAK_HOLD_DECAY);
+    vPeakHold = Math.max(Math.abs(dbg.vFilt), vPeakHold * PEAK_HOLD_DECAY);
+    document.getElementById('dbgAPeak').textContent = 'peak ' + aPeakHold.toFixed(3);
+    document.getElementById('dbgVPeak').textContent = 'peak ' + vPeakHold.toFixed(3);
     const dbgRestEl = document.getElementById('dbgRest');
     dbgRestEl.textContent = dbg.atRest ? 'yes' : 'no';
     dbgRestEl.className = 'val ' + (dbg.atRest ? 'phase-moving' : 'phase-idle');
@@ -582,8 +588,6 @@ function createEngine(opts) {
 
     const aVal = acc[axisPicked] || 0;
     engine.ingest(t, aVal);
-    const dbg = engine.getDebug();
-    logBuffer.push({ t, raw: aVal, aFilt: dbg.aFilt, vFilt: dbg.vFilt, state: engine.getState() });
   }
 
   permitBtn.addEventListener('click', function() {
@@ -640,7 +644,7 @@ function createEngine(opts) {
     calibDeadline = performance.now() + 1500;
     lastRepsCount = 0;
     velHistory = [];
-    logBuffer = [];
+    aPeakHold = 0; vPeakHold = 0;
     gravityEst = null;
     setActive = true;
     repList.innerHTML = '<div class="empty-note">Calibrating axis — move through one rep now…</div>';
@@ -657,22 +661,6 @@ function createEngine(opts) {
     stopSetBtn.style.display = 'none';
     startSetBtn.style.display = 'block';
     if (repList.children.length === 0) repList.innerHTML = '<div class="empty-note">No reps detected this set.</div>';
-    if (logBuffer.length > 0) downloadLogBtn.style.display = 'block';
-  });
-
-  downloadLogBtn.addEventListener('click', function() {
-    if (logBuffer.length === 0) return;
-    const header = 't_ms,raw_accel,aFilt,vFilt,state\n';
-    const rows = logBuffer.map(s => [s.t.toFixed(1), s.raw.toFixed(4), s.aFilt.toFixed(4), s.vFilt.toFixed(4), s.state].join(',')).join('\n');
-    const blob = new Blob([header + rows], { type: 'text/csv' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = 'rep-log-' + Date.now() + '.csv';
-    document.body.appendChild(a);
-    a.click();
-    document.body.removeChild(a);
-    setTimeout(() => URL.revokeObjectURL(url), 1000);
   });
 
   resetBtn.addEventListener('click', function() {
@@ -692,8 +680,6 @@ function createEngine(opts) {
     startSetBtn.style.display = 'block';
     startSetBtn.disabled = !sensorsReady;
     statusText.textContent = sensorsReady ? 'ready' : 'idle';
-    downloadLogBtn.style.display = 'none';
-    logBuffer = [];
   });
 
   // Training-goal toggle: presets the velocity-loss stop threshold.
