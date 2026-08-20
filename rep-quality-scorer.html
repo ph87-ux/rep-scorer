@@ -131,6 +131,7 @@
 
   <button class="btn btn-primary" id="startSetBtn" disabled>Start Set</button>
   <button class="btn btn-stop" id="stopSetBtn" style="display:none">Stop Set</button>
+  <button class="btn btn-ghost" id="downloadLogBtn" style="display:none">Download Log (for tuning)</button>
   <button class="btn btn-ghost" id="resetBtn">Reset</button>
 
   <div class="panel">
@@ -149,17 +150,16 @@
 
   <div class="panel">
     <div class="panel-title">Debug / Tuning</div>
-    <div class="tempo-grid" style="grid-template-columns:1fr 1fr 1fr;">
-      <div class="tempo-field"><label>Vel thresh</label><input type="number" id="vThreshIn" value="0.05" step="0.05" min="0.01"></div>
-      <div class="tempo-field"><label>Accel thresh</label><input type="number" id="aThreshIn" value="0.6" step="0.1" min="0.1"></div>
-      <div class="tempo-field"><label>Pause hold (ms)</label><input type="number" id="pauseHoldIn" value="400" step="25" min="150"></div>
+    <div class="tempo-grid" style="grid-template-columns:1fr 1fr;">
+      <div class="tempo-field"><label>Accel thresh</label><input type="number" id="aThreshIn" value="0.15" step="0.05" min="0.02"></div>
+      <div class="tempo-field"><label>Pause hold (ms)</label><input type="number" id="pauseHoldIn" value="300" step="25" min="150"></div>
     </div>
     <div class="live-row" style="margin-top:10px;">
       <div class="live-box"><div class="lbl">aFilt</div><div class="val" id="dbgA" style="font-size:13px">—</div></div>
       <div class="live-box"><div class="lbl">vFilt</div><div class="val" id="dbgV" style="font-size:13px">—</div></div>
       <div class="live-box"><div class="lbl">At Rest</div><div class="val" id="dbgRest" style="font-size:13px">—</div></div>
     </div>
-    <div style="font-size:11px;color:var(--dim);margin-top:8px;line-height:1.4;">Pause detection is gated on Accel thresh only (velocity drifts, so it's not used as a gate). If reps aren't detected, raise Accel thresh and watch aFilt live until "At Rest" reads "yes" only during genuine pauses. Vel thresh is currently unused — kept for future tuning.</div>
+    <div style="font-size:11px;color:var(--dim);margin-top:8px;line-height:1.4;">Velocity is now judged relative to each phase's own peak, so it adapts automatically to slow/light vs fast/heavy reps. Accel thresh still matters — if reps are missed, raise it slightly; if slow reps split into false extra reps, lower it slightly.</div>
   </div>
 
   <div class="alert-banner" id="alertBanner" style="display:none">⚠ VELOCITY LOSS THRESHOLD REACHED — CONSIDER ENDING SET</div>
@@ -188,14 +188,16 @@
 // ---------- Rep detection + scoring engine ----------
 function createEngine(opts) {
   const cfg = Object.assign({
-    vThresh: 0.05, aThresh: 0.6, pauseHoldMs: 400, lpAlpha: 0.25,
+    vThreshFloor: 0.01, velRelFrac: 0.25, aThresh: 0.15, pauseHoldMs: 300, graceMs: 500,
+    minPhaseMs: 800, lpAlpha: 0.25,
     phase1Target: 4, pause1Target: 2, phase2Target: 4, pause2Target: 2,
     tempoTolerance: 0.6
   }, opts || {});
 
   let state = 'idle';
   let vFilt = 0, aFilt = 0, v = 0, lastT = null, lastA = 0;
-  let belowSince = null, phaseStartT = null, phaseSamples = [];
+  let belowSince = null, phaseStartT = null, movingSinceT = null, phaseSamples = [];
+  let phasePeakAbsV = 0;
   let completedPhases = [], reps = [], romHistory = [], maxAbsA = 0.001;
 
   function finishPhase(tNow) {
@@ -264,6 +266,20 @@ function createEngine(opts) {
       phase1PeakV: p1.peakAbsV, phase2PeakV: p2.peakAbsV };
   }
 
+  function confirmPause(t) {
+    v = 0; vFilt = 0;
+    const phase = finishPhase(t);
+    if (phase) {
+      completedPhases.push(phase);
+      if (completedPhases.length >= 2) {
+        const p2 = completedPhases.pop();
+        const p1 = completedPhases.pop();
+        reps.push(packageRep(p1, p2));
+      }
+    }
+    state = 'paused';
+  }
+
   function ingest(t, aRaw) {
     if (lastT === null) { lastT = t; lastA = aRaw; aFilt = aRaw; return; }
     const dt = (t - lastT) / 1000;
@@ -273,31 +289,26 @@ function createEngine(opts) {
     v = v + (lastA + aFilt) / 2 * dt;
     vFilt = vFilt + cfg.lpAlpha * (v - vFilt);
 
-    // Gate on acceleration stillness ONLY — velocity is drift-prone by nature (it's a running
-    // integral), so requiring it to already be near-zero before confirming a pause creates a
-    // deadlock: once drift pushes it off, there's no way back without a pause being confirmed
-    // first. Acceleration returning to near-zero is the physically reliable "it's stationary"
-    // signal, and confirming a pause on that is what resets (zeroes) the velocity drift.
-    const atRest = Math.abs(aFilt) < cfg.aThresh;
+    if (state === 'moving') phasePeakAbsV = Math.max(phasePeakAbsV, Math.abs(vFilt));
 
-    if (atRest) {
-      if (belowSince === null) belowSince = t;
-      if (t - belowSince >= cfg.pauseHoldMs && state === 'moving') {
-        v = 0; vFilt = 0;
-        const phase = finishPhase(t);
-        if (phase) {
-          completedPhases.push(phase);
-          if (completedPhases.length >= 2) {
-            const p2 = completedPhases.pop();
-            const p1 = completedPhases.pop();
-            reps.push(packageRep(p1, p2));
-          }
-        }
-        state = 'paused';
-      }
-    } else {
-      belowSince = null;
-      if (state !== 'moving') { state = 'moving'; phaseStartT = t; phaseSamples = []; }
+    // Velocity is judged relative to THIS phase's own peak, not a fixed absolute number —
+    // this is what lets the same thresholds work whether the rep is fast/heavy or slow/light,
+    // rather than needing to be hand-tuned per exercise or per client.
+    const aQuiet = Math.abs(aFilt) < cfg.aThresh;
+    const velLowBar = Math.max(cfg.vThreshFloor, cfg.velRelFrac * phasePeakAbsV);
+    const velLow = Math.abs(vFilt) < velLowBar;
+    const bothQuiet = aQuiet && velLow;
+
+    if (bothQuiet) { if (belowSince === null) belowSince = t; } else { belowSince = null; }
+
+    const inGrace = state === 'moving' && movingSinceT !== null && (t - movingSinceT) < cfg.graceMs;
+    const tooShort = state === 'moving' && phaseStartT !== null && (t - phaseStartT) < cfg.minPhaseMs;
+    const fire = !inGrace && !tooShort && belowSince !== null && (t - belowSince) >= cfg.pauseHoldMs;
+
+    if (fire && state === 'moving') {
+      confirmPause(t);
+    } else if (state !== 'moving' && !bothQuiet) {
+      state = 'moving'; phaseStartT = t; movingSinceT = t; phaseSamples = []; phasePeakAbsV = 0;
     }
     if (state === 'moving') phaseSamples.push({ t, v: vFilt, a: aFilt });
     lastT = t; lastA = aFilt;
@@ -315,6 +326,7 @@ function createEngine(opts) {
   const permitBtn = document.getElementById('permitBtn');
   const startSetBtn = document.getElementById('startSetBtn');
   const stopSetBtn = document.getElementById('stopSetBtn');
+  const downloadLogBtn = document.getElementById('downloadLogBtn');
   const resetBtn = document.getElementById('resetBtn');
   const errBox = document.getElementById('errBox');
   const livePhase = document.getElementById('livePhase');
@@ -335,6 +347,7 @@ function createEngine(opts) {
   let gravityEst = null; // slow-tracking gravity estimate per axis — computed ourselves, not trusted from the browser
   const GRAVITY_ALPHA = 0.04; // gated to pauses only now, so can track a bit faster
   let velHistory = [];
+  let logBuffer = [];
   const VEL_WINDOW_MS = 6000;
   const velCanvas = document.getElementById('velCanvas');
   const velCtx = velCanvas.getContext('2d');
@@ -555,6 +568,8 @@ function createEngine(opts) {
 
     const aVal = acc[axisPicked] || 0;
     engine.ingest(t, aVal);
+    const dbg = engine.getDebug();
+    logBuffer.push({ t, raw: aVal, aFilt: dbg.aFilt, vFilt: dbg.vFilt, state: engine.getState() });
   }
 
   permitBtn.addEventListener('click', function() {
@@ -603,15 +618,15 @@ function createEngine(opts) {
       pause1Target: parseFloat(document.getElementById('p1').value) || 2,
       phase2Target: parseFloat(document.getElementById('t2').value) || 4,
       pause2Target: parseFloat(document.getElementById('p2').value) || 2,
-      vThresh: parseFloat(document.getElementById('vThreshIn').value) || 0.05,
-      aThresh: parseFloat(document.getElementById('aThreshIn').value) || 0.6,
-      pauseHoldMs: parseFloat(document.getElementById('pauseHoldIn').value) || 150,
+      aThresh: parseFloat(document.getElementById('aThreshIn').value) || 0.15,
+      pauseHoldMs: parseFloat(document.getElementById('pauseHoldIn').value) || 300,
     });
     axisPicked = null;
     calibBuffer = { x: [], y: [], z: [] };
     calibDeadline = performance.now() + 1500;
     lastRepsCount = 0;
     velHistory = [];
+    logBuffer = [];
     gravityEst = null;
     setActive = true;
     repList.innerHTML = '<div class="empty-note">Calibrating axis — move through one rep now…</div>';
@@ -628,6 +643,22 @@ function createEngine(opts) {
     stopSetBtn.style.display = 'none';
     startSetBtn.style.display = 'block';
     if (repList.children.length === 0) repList.innerHTML = '<div class="empty-note">No reps detected this set.</div>';
+    if (logBuffer.length > 0) downloadLogBtn.style.display = 'block';
+  });
+
+  downloadLogBtn.addEventListener('click', function() {
+    if (logBuffer.length === 0) return;
+    const header = 't_ms,raw_accel,aFilt,vFilt,state\n';
+    const rows = logBuffer.map(s => [s.t.toFixed(1), s.raw.toFixed(4), s.aFilt.toFixed(4), s.vFilt.toFixed(4), s.state].join(',')).join('\n');
+    const blob = new Blob([header + rows], { type: 'text/csv' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = 'rep-log-' + Date.now() + '.csv';
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
   });
 
   resetBtn.addEventListener('click', function() {
@@ -647,6 +678,8 @@ function createEngine(opts) {
     startSetBtn.style.display = 'block';
     startSetBtn.disabled = !sensorsReady;
     statusText.textContent = sensorsReady ? 'ready' : 'idle';
+    downloadLogBtn.style.display = 'none';
+    logBuffer = [];
   });
 })();
 </script>
