@@ -152,14 +152,14 @@
     <div class="tempo-grid" style="grid-template-columns:1fr 1fr 1fr;">
       <div class="tempo-field"><label>Vel thresh</label><input type="number" id="vThreshIn" value="0.05" step="0.05" min="0.01"></div>
       <div class="tempo-field"><label>Accel thresh</label><input type="number" id="aThreshIn" value="0.6" step="0.1" min="0.1"></div>
-      <div class="tempo-field"><label>Pause hold (ms)</label><input type="number" id="pauseHoldIn" value="150" step="10" min="50"></div>
+      <div class="tempo-field"><label>Pause hold (ms)</label><input type="number" id="pauseHoldIn" value="400" step="25" min="150"></div>
     </div>
     <div class="live-row" style="margin-top:10px;">
       <div class="live-box"><div class="lbl">aFilt</div><div class="val" id="dbgA" style="font-size:13px">—</div></div>
       <div class="live-box"><div class="lbl">vFilt</div><div class="val" id="dbgV" style="font-size:13px">—</div></div>
       <div class="live-box"><div class="lbl">At Rest</div><div class="val" id="dbgRest" style="font-size:13px">—</div></div>
     </div>
-    <div style="font-size:11px;color:var(--dim);margin-top:8px;line-height:1.4;">If reps stop being detected after the first one, aFilt is probably not settling below "Accel thresh" between reps — raise it and watch aFilt live to find a value that reads "yes" for At Rest only during genuine pauses.</div>
+    <div style="font-size:11px;color:var(--dim);margin-top:8px;line-height:1.4;">Pause detection is gated on Accel thresh only (velocity drifts, so it's not used as a gate). If reps aren't detected, raise Accel thresh and watch aFilt live until "At Rest" reads "yes" only during genuine pauses. Vel thresh is currently unused — kept for future tuning.</div>
   </div>
 
   <div class="alert-banner" id="alertBanner" style="display:none">⚠ VELOCITY LOSS THRESHOLD REACHED — CONSIDER ENDING SET</div>
@@ -184,7 +184,7 @@
 // ---------- Rep detection + scoring engine ----------
 function createEngine(opts) {
   const cfg = Object.assign({
-    vThresh: 0.05, aThresh: 0.6, pauseHoldMs: 150, lpAlpha: 0.25,
+    vThresh: 0.05, aThresh: 0.6, pauseHoldMs: 400, lpAlpha: 0.25,
     phase1Target: 4, pause1Target: 2, phase2Target: 4, pause2Target: 2,
     tempoTolerance: 0.6
   }, opts || {});
@@ -269,7 +269,12 @@ function createEngine(opts) {
     v = v + (lastA + aFilt) / 2 * dt;
     vFilt = vFilt + cfg.lpAlpha * (v - vFilt);
 
-    const atRest = Math.abs(vFilt) < cfg.vThresh && Math.abs(aFilt) < cfg.aThresh;
+    // Gate on acceleration stillness ONLY — velocity is drift-prone by nature (it's a running
+    // integral), so requiring it to already be near-zero before confirming a pause creates a
+    // deadlock: once drift pushes it off, there's no way back without a pause being confirmed
+    // first. Acceleration returning to near-zero is the physically reliable "it's stationary"
+    // signal, and confirming a pause on that is what resets (zeroes) the velocity drift.
+    const atRest = Math.abs(aFilt) < cfg.aThresh;
 
     if (atRest) {
       if (belowSince === null) belowSince = t;
@@ -295,7 +300,7 @@ function createEngine(opts) {
   }
 
   return { ingest, getReps: () => reps, getState: () => state,
-    getDebug: () => ({ aFilt, vFilt, atRest: Math.abs(vFilt) < cfg.vThresh && Math.abs(aFilt) < cfg.aThresh }) };
+    getDebug: () => ({ aFilt, vFilt, atRest: Math.abs(aFilt) < cfg.aThresh }) };
 }
 
 // ---------- UI wiring ----------
@@ -323,6 +328,8 @@ function createEngine(opts) {
   let lastRepsCount = 0;
   let baselinePeakV = null;
   let audioCtx = null;
+  let gravityEst = null; // slow-tracking gravity estimate per axis — computed ourselves, not trusted from the browser
+  const GRAVITY_ALPHA = 0.01; // very slow — tracks orientation drift, not real movement
   let velHistory = [];
   const VEL_WINDOW_MS = 6000;
   const velCanvas = document.getElementById('velCanvas');
@@ -497,14 +504,27 @@ function createEngine(opts) {
   }
 
   function handleMotion(e) {
-    const acc = e.acceleration && (e.acceleration.x !== null) ? e.acceleration : e.accelerationIncludingGravity;
-    if (!acc) return;
+    const raw = e.accelerationIncludingGravity;
+    if (!raw || raw.x === null) return;
     const t = performance.now();
 
+    if (gravityEst === null) {
+      gravityEst = { x: raw.x || 0, y: raw.y || 0, z: raw.z || 0 };
+    } else {
+      gravityEst.x += GRAVITY_ALPHA * ((raw.x || 0) - gravityEst.x);
+      gravityEst.y += GRAVITY_ALPHA * ((raw.y || 0) - gravityEst.y);
+      gravityEst.z += GRAVITY_ALPHA * ((raw.z || 0) - gravityEst.z);
+    }
+    const acc = {
+      x: (raw.x || 0) - gravityEst.x,
+      y: (raw.y || 0) - gravityEst.y,
+      z: (raw.z || 0) - gravityEst.z,
+    };
+
     if (axisPicked === null) {
-      calibBuffer.x.push(acc.x || 0);
-      calibBuffer.y.push(acc.y || 0);
-      calibBuffer.z.push(acc.z || 0);
+      calibBuffer.x.push(acc.x);
+      calibBuffer.y.push(acc.y);
+      calibBuffer.z.push(acc.z);
       if (t < calibDeadline) return;
       const variance = (arr) => { const m = arr.reduce((a,b)=>a+b,0)/arr.length; return arr.reduce((a,b)=>a+(b-m)*(b-m),0)/arr.length; };
       const vx = variance(calibBuffer.x), vy = variance(calibBuffer.y), vz = variance(calibBuffer.z);
@@ -572,6 +592,7 @@ function createEngine(opts) {
     calibDeadline = performance.now() + 1500;
     lastRepsCount = 0;
     velHistory = [];
+    gravityEst = null;
     setActive = true;
     repList.innerHTML = '<div class="empty-note">Calibrating axis — move through one rep now…</div>';
     summaryNum.textContent = '—'; summaryLbl.textContent = 'no reps yet';
