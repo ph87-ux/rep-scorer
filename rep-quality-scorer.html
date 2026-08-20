@@ -164,7 +164,7 @@
   <div class="panel">
     <div class="panel-title">Debug / Tuning</div>
     <div class="tempo-grid" style="grid-template-columns:1fr 1fr;">
-      <div class="tempo-field"><label>Accel thresh</label><input type="number" id="aThreshIn" value="0.15" step="0.05" min="0.02"></div>
+      <div class="tempo-field"><label>Accel thresh</label><input type="number" id="aThreshIn" value="0.5" step="0.05" min="0.02"></div>
       <div class="tempo-field"><label>Pause hold (ms)</label><input type="number" id="pauseHoldIn" value="300" step="25" min="150"></div>
     </div>
     <div class="live-row" style="margin-top:10px;">
@@ -201,7 +201,7 @@
 // ---------- Rep detection + scoring engine ----------
 function createEngine(opts) {
   const cfg = Object.assign({
-    vThreshFloor: 0.01, velRelFrac: 0.25, aThresh: 0.15, pauseHoldMs: 300, graceMs: 500,
+    vThreshFloor: 0.01, velRelFrac: 0.25, aThresh: 0.5, pauseHoldMs: 300, graceMs: 500,
     minPhaseMs: 800, lpAlpha: 0.25,
     phase1Target: 4, pause1Target: 2, phase2Target: 4, pause2Target: 2,
     tempoTolerance: 0.6
@@ -636,7 +636,7 @@ function createEngine(opts) {
       pause1Target: parseFloat(document.getElementById('p1').value) || 2,
       phase2Target: parseFloat(document.getElementById('t2').value) || 4,
       pause2Target: parseFloat(document.getElementById('p2').value) || 2,
-      aThresh: parseFloat(document.getElementById('aThreshIn').value) || 0.15,
+      aThresh: parseFloat(document.getElementById('aThreshIn').value) || 0.5,
       pauseHoldMs: parseFloat(document.getElementById('pauseHoldIn').value) || 300,
     });
     axisPicked = null;
