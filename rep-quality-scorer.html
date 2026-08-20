@@ -142,6 +142,26 @@
     </div>
   </div>
 
+  <div class="panel">
+    <div class="panel-title">Velocity Trace (m/s)</div>
+    <canvas id="velCanvas" style="width:100%; height:120px; display:block; border-radius:6px; background:#0a0d0c;"></canvas>
+  </div>
+
+  <div class="panel">
+    <div class="panel-title">Debug / Tuning</div>
+    <div class="tempo-grid" style="grid-template-columns:1fr 1fr 1fr;">
+      <div class="tempo-field"><label>Vel thresh</label><input type="number" id="vThreshIn" value="0.05" step="0.05" min="0.01"></div>
+      <div class="tempo-field"><label>Accel thresh</label><input type="number" id="aThreshIn" value="0.6" step="0.1" min="0.1"></div>
+      <div class="tempo-field"><label>Pause hold (ms)</label><input type="number" id="pauseHoldIn" value="150" step="10" min="50"></div>
+    </div>
+    <div class="live-row" style="margin-top:10px;">
+      <div class="live-box"><div class="lbl">aFilt</div><div class="val" id="dbgA" style="font-size:13px">—</div></div>
+      <div class="live-box"><div class="lbl">vFilt</div><div class="val" id="dbgV" style="font-size:13px">—</div></div>
+      <div class="live-box"><div class="lbl">At Rest</div><div class="val" id="dbgRest" style="font-size:13px">—</div></div>
+    </div>
+    <div style="font-size:11px;color:var(--dim);margin-top:8px;line-height:1.4;">If reps stop being detected after the first one, aFilt is probably not settling below "Accel thresh" between reps — raise it and watch aFilt live to find a value that reads "yes" for At Rest only during genuine pauses.</div>
+  </div>
+
   <div class="alert-banner" id="alertBanner" style="display:none">⚠ VELOCITY LOSS THRESHOLD REACHED — CONSIDER ENDING SET</div>
 
   <div class="panel">
@@ -164,7 +184,7 @@
 // ---------- Rep detection + scoring engine ----------
 function createEngine(opts) {
   const cfg = Object.assign({
-    vThresh: 0.05, aThresh: 0.3, pauseHoldMs: 120, lpAlpha: 0.25,
+    vThresh: 0.05, aThresh: 0.6, pauseHoldMs: 150, lpAlpha: 0.25,
     phase1Target: 4, pause1Target: 2, phase2Target: 4, pause2Target: 2,
     tempoTolerance: 0.6
   }, opts || {});
@@ -193,6 +213,10 @@ function createEngine(opts) {
       ? endWindow.reduce((a,s)=>a+Math.abs(s.a),0)/endWindow.length
       : Math.abs(phaseSamples[phaseSamples.length-1].a);
     const dir = pos >= 0 ? 1 : -1;
+    // Hard mechanical ceiling: this rig cannot travel more than 300mm in either
+    // direction, so any drift-inflated estimate beyond that is a sensor artifact, not real motion.
+    const MAX_STROKE_M = 0.3;
+    pos = Math.max(-MAX_STROKE_M, Math.min(MAX_STROKE_M, pos));
     phaseSamples = [];
     return { duration, rom: Math.abs(pos), peakAbsV, jerkRms, endAbsA, dir };
   }
@@ -270,7 +294,8 @@ function createEngine(opts) {
     lastT = t; lastA = aFilt;
   }
 
-  return { ingest, getReps: () => reps, getState: () => state };
+  return { ingest, getReps: () => reps, getState: () => state,
+    getDebug: () => ({ aFilt, vFilt, atRest: Math.abs(vFilt) < cfg.vThresh && Math.abs(aFilt) < cfg.aThresh }) };
 }
 
 // ---------- UI wiring ----------
@@ -298,6 +323,58 @@ function createEngine(opts) {
   let lastRepsCount = 0;
   let baselinePeakV = null;
   let audioCtx = null;
+  let velHistory = [];
+  const VEL_WINDOW_MS = 6000;
+  const velCanvas = document.getElementById('velCanvas');
+  const velCtx = velCanvas.getContext('2d');
+  function sizeCanvas() {
+    const rect = velCanvas.getBoundingClientRect();
+    const dpr = window.devicePixelRatio || 1;
+    velCanvas.width = rect.width * dpr;
+    velCanvas.height = rect.height * dpr;
+    velCtx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  }
+  sizeCanvas();
+  window.addEventListener('resize', sizeCanvas);
+
+  function drawVelocityGraph() {
+    const rect = velCanvas.getBoundingClientRect();
+    const w = rect.width, h = rect.height;
+    velCtx.clearRect(0, 0, w, h);
+    if (velHistory.length < 2) return;
+    const now = velHistory[velHistory.length - 1].t;
+    const cutoff = now - VEL_WINDOW_MS;
+    while (velHistory.length && velHistory[0].t < cutoff) velHistory.shift();
+
+    let maxAbs = 0.1;
+    for (const s of velHistory) maxAbs = Math.max(maxAbs, Math.abs(s.v));
+    maxAbs *= 1.15; // headroom
+
+    // zero line
+    velCtx.strokeStyle = '#232a28';
+    velCtx.lineWidth = 1;
+    velCtx.beginPath();
+    velCtx.moveTo(0, h / 2);
+    velCtx.lineTo(w, h / 2);
+    velCtx.stroke();
+
+    // trace
+    velCtx.strokeStyle = '#7de08d';
+    velCtx.lineWidth = 2;
+    velCtx.beginPath();
+    velHistory.forEach((s, i) => {
+      const x = ((s.t - cutoff) / VEL_WINDOW_MS) * w;
+      const y = h / 2 - (s.v / maxAbs) * (h / 2 - 6);
+      if (i === 0) velCtx.moveTo(x, y); else velCtx.lineTo(x, y);
+    });
+    velCtx.stroke();
+
+    // scale label
+    velCtx.fillStyle = '#6b7a76';
+    velCtx.font = '9px monospace';
+    velCtx.fillText('+' + maxAbs.toFixed(2) + ' m/s', 4, 10);
+    velCtx.fillText('-' + maxAbs.toFixed(2) + ' m/s', 4, h - 4);
+  }
   const flashOverlay = document.getElementById('flashOverlay');
   const alertBanner = document.getElementById('alertBanner');
   const liveVLoss = document.getElementById('liveVLoss');
@@ -377,6 +454,16 @@ function createEngine(opts) {
     const st = engine.getState();
     livePhase.textContent = st;
     livePhase.className = 'val ' + (st === 'moving' ? 'phase-moving' : st === 'paused' ? 'phase-paused' : 'phase-idle');
+
+    const dbg = engine.getDebug();
+    document.getElementById('dbgA').textContent = dbg.aFilt.toFixed(3);
+    document.getElementById('dbgV').textContent = dbg.vFilt.toFixed(3);
+    const dbgRestEl = document.getElementById('dbgRest');
+    dbgRestEl.textContent = dbg.atRest ? 'yes' : 'no';
+    dbgRestEl.className = 'val ' + (dbg.atRest ? 'phase-moving' : 'phase-idle');
+
+    velHistory.push({ t: performance.now(), v: dbg.vFilt });
+    drawVelocityGraph();
     const reps = engine.getReps();
     liveRep.textContent = reps.length;
     if (reps.length > lastRepsCount) {
@@ -476,11 +563,15 @@ function createEngine(opts) {
       pause1Target: parseFloat(document.getElementById('p1').value) || 2,
       phase2Target: parseFloat(document.getElementById('t2').value) || 4,
       pause2Target: parseFloat(document.getElementById('p2').value) || 2,
+      vThresh: parseFloat(document.getElementById('vThreshIn').value) || 0.05,
+      aThresh: parseFloat(document.getElementById('aThreshIn').value) || 0.6,
+      pauseHoldMs: parseFloat(document.getElementById('pauseHoldIn').value) || 150,
     });
     axisPicked = null;
     calibBuffer = { x: [], y: [], z: [] };
     calibDeadline = performance.now() + 1500;
     lastRepsCount = 0;
+    velHistory = [];
     setActive = true;
     repList.innerHTML = '<div class="empty-note">Calibrating axis — move through one rep now…</div>';
     summaryNum.textContent = '—'; summaryLbl.textContent = 'no reps yet';
