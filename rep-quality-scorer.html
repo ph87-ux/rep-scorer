@@ -209,7 +209,7 @@ function createEngine(opts) {
 
   let state = 'idle';
   let vFilt = 0, aFilt = 0, v = 0, lastT = null, lastA = 0;
-  let belowSince = null, phaseStartT = null, movingSinceT = null, phaseSamples = [];
+  let belowSince = null, belowASince = null, phaseStartT = null, movingSinceT = null, phaseSamples = [];
   let phasePeakAbsV = 0;
   let completedPhases = [], reps = [], romHistory = [], maxAbsA = 0.001;
 
@@ -308,20 +308,26 @@ function createEngine(opts) {
     // this is what lets the same thresholds work whether the rep is fast/heavy or slow/light,
     // rather than needing to be hand-tuned per exercise or per client.
     const aQuiet = Math.abs(aFilt) < cfg.aThresh;
+
+    // Zero-velocity update: this must be judged from acceleration ALONE, sustained for
+    // pauseHoldMs. If it were gated behind the velocity-based "quiet" check below, a
+    // velocity that has already drifted away from zero could never look "low" relative
+    // to a normal rep's peak — meaning drift would prevent the very check meant to
+    // correct it, a permanent deadlock. Acceleration alone doesn't have this problem:
+    // real stillness always shows quiet acceleration for a sustained stretch, regardless
+    // of whatever the (possibly drifted) velocity number currently reads.
+    if (aQuiet) { if (belowASince === null) belowASince = t; } else { belowASince = null; }
+    const restConfirmed = belowASince !== null && (t - belowASince) >= cfg.pauseHoldMs;
+    if (restConfirmed) { v = 0; vFilt = 0; }
+
+    // Velocity is judged relative to THIS phase's own peak, not a fixed absolute number —
+    // this is what lets the same thresholds work whether the rep is fast/heavy or slow/light,
+    // rather than needing to be hand-tuned per exercise or per client.
     const velLowBar = Math.max(cfg.vThreshFloor, cfg.velRelFrac * phasePeakAbsV);
     const velLow = Math.abs(vFilt) < velLowBar;
     const bothQuiet = aQuiet && velLow;
 
     if (bothQuiet) { if (belowSince === null) belowSince = t; } else { belowSince = null; }
-
-    // Zero-velocity update: once we've been genuinely still for pauseHoldMs (not just
-    // a single quiet instant — acceleration also crosses near-zero at peak velocity
-    // mid-rep, which must NOT get zeroed), actively pin velocity at zero every frame.
-    // Without this, small residual bias left over from imperfect gravity cancellation
-    // (e.g. a mount that isn't perfectly level) integrates into an ever-growing
-    // velocity number the longer you stay still, rather than settling back to zero.
-    const restConfirmed = belowSince !== null && (t - belowSince) >= cfg.pauseHoldMs;
-    if (restConfirmed) { v = 0; vFilt = 0; }
 
     const inGrace = state === 'moving' && movingSinceT !== null && (t - movingSinceT) < cfg.graceMs;
     const tooShort = state === 'moving' && phaseStartT !== null && (t - phaseStartT) < cfg.minPhaseMs;
