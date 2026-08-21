@@ -314,6 +314,15 @@ function createEngine(opts) {
 
     if (bothQuiet) { if (belowSince === null) belowSince = t; } else { belowSince = null; }
 
+    // Zero-velocity update: once we've been genuinely still for pauseHoldMs (not just
+    // a single quiet instant — acceleration also crosses near-zero at peak velocity
+    // mid-rep, which must NOT get zeroed), actively pin velocity at zero every frame.
+    // Without this, small residual bias left over from imperfect gravity cancellation
+    // (e.g. a mount that isn't perfectly level) integrates into an ever-growing
+    // velocity number the longer you stay still, rather than settling back to zero.
+    const restConfirmed = belowSince !== null && (t - belowSince) >= cfg.pauseHoldMs;
+    if (restConfirmed) { v = 0; vFilt = 0; }
+
     const inGrace = state === 'moving' && movingSinceT !== null && (t - movingSinceT) < cfg.graceMs;
     const tooShort = state === 'moving' && phaseStartT !== null && (t - phaseStartT) < cfg.minPhaseMs;
     const fire = !inGrace && !tooShort && belowSince !== null && (t - belowSince) >= cfg.pauseHoldMs;
