@@ -143,9 +143,12 @@
     <div class="live-row" style="margin-top:10px;">
       <div class="live-box"><div class="lbl">aFilt (peak)</div><div class="val" id="dbgA" style="font-size:13px">—</div><div style="font-size:10px;color:var(--dim);margin-top:2px;" id="dbgAPeak">peak —</div></div>
       <div class="live-box"><div class="lbl">vFilt (peak)</div><div class="val" id="dbgV" style="font-size:13px">—</div><div style="font-size:10px;color:var(--dim);margin-top:2px;" id="dbgVPeak">peak —</div></div>
+    </div>
+    <div class="live-row" style="margin-top:6px;">
+      <div class="live-box"><div class="lbl">|a| vs gravity</div><div class="val" id="dbgAMag" style="font-size:13px">—</div></div>
       <div class="live-box"><div class="lbl">At Rest</div><div class="val" id="dbgRest" style="font-size:13px">—</div></div>
     </div>
-    <div style="font-size:11px;color:var(--dim);margin-top:8px;line-height:1.4;">The top number updates every frame and will flicker with sensor noise — read the smaller "peak" number underneath instead, which holds the highest value briefly before decaying, so it's actually readable while lifting. Velocity is now judged relative to each phase's own peak, so it adapts automatically to slow/light vs fast/heavy reps. Accel thresh still matters — if reps are missed, raise it slightly; if slow reps split into false extra reps, lower it slightly.</div>
+    <div style="font-size:11px;color:var(--dim);margin-top:8px;line-height:1.4;">The top number updates every frame and will flicker with sensor noise — read the smaller "peak" number underneath instead, which holds the highest value briefly before decaying, so it's actually readable while lifting. "At Rest" is judged from |a| vs gravity, which should settle near 0 whenever you're actually still — if it never drops below Accel thresh, raise the threshold slightly. Velocity is judged relative to each phase's own peak, so it adapts automatically to slow/light vs fast/heavy reps.</div>
   </div>
 
   <div class="panel">
@@ -181,6 +184,7 @@ function createEngine(opts) {
 
   let state = 'idle';
   let vFilt = 0, aFilt = 0, v = 0, lastT = null, lastA = 0;
+  let aMagFilt = 0; // low-passed |raw accel vector| - gravity — orientation-independent "at rest" signal
   let belowSince = null, belowASince = null, phaseStartT = null, movingSinceT = null, phaseSamples = [];
   let phasePeakAbsV = 0;
   let completedPhases = [], reps = [], romHistory = [], maxAbsA = 0.001;
@@ -297,21 +301,24 @@ function createEngine(opts) {
     pauseStartT = t;
   }
 
-  function ingest(t, aRaw) {
-    if (lastT === null) { lastT = t; lastA = aRaw; aFilt = aRaw; return; }
+  function ingest(t, aRaw, aMagRaw) {
+    if (lastT === null) { lastT = t; lastA = aRaw; aFilt = aRaw; aMagFilt = aMagRaw || 0; return; }
     const dt = (t - lastT) / 1000;
     if (dt <= 0) return;
     aFilt = aFilt + cfg.lpAlpha * (aRaw - aFilt);
+    aMagFilt = aMagFilt + cfg.lpAlpha * ((aMagRaw || 0) - aMagFilt);
     maxAbsA = Math.max(maxAbsA, Math.abs(aFilt));
     v = v + (lastA + aFilt) / 2 * dt;
     vFilt = vFilt + cfg.lpAlpha * (v - vFilt);
 
     if (state === 'moving') phasePeakAbsV = Math.max(phasePeakAbsV, Math.abs(vFilt));
 
-    // Velocity is judged relative to THIS phase's own peak, not a fixed absolute number —
-    // this is what lets the same thresholds work whether the rep is fast/heavy or slow/light,
-    // rather than needing to be hand-tuned per exercise or per client.
-    const aQuiet = Math.abs(aFilt) < cfg.aThresh;
+    // "At rest" is judged from the TOTAL acceleration magnitude vs. gravity, not the single
+    // gravity-subtracted axis used for velocity/direction below. A single axis's gravity share
+    // shifts with device tilt (the phone rocking slightly during a rep), which reads as false
+    // motion and can permanently prevent "quiet" from ever being detected again. Vector
+    // magnitude vs. gravity doesn't care about orientation, so it stays reliable regardless.
+    const aQuiet = Math.abs(aMagFilt) < cfg.aThresh;
 
     // Zero-velocity update: this must be judged from acceleration ALONE, sustained for
     // pauseHoldMs. If it were gated behind the velocity-based "quiet" check below, a
@@ -351,7 +358,7 @@ function createEngine(opts) {
     dropLastRep: () => { reps.pop(); },
     getPauseDurations: () => pauseDurations,
     getCurrentPauseElapsed: (tNow) => (state === 'paused' && pauseStartT !== null) ? (tNow - pauseStartT) / 1000 : 0,
-    getDebug: () => ({ aFilt, vFilt, atRest: Math.abs(aFilt) < cfg.aThresh }) };
+    getDebug: () => ({ aFilt, vFilt, aMagFilt, atRest: Math.abs(aMagFilt) < cfg.aThresh }) };
 }
 
 // ---------- UI wiring ----------
@@ -523,6 +530,7 @@ function createEngine(opts) {
     const dbg = engine.getDebug();
     document.getElementById('dbgA').textContent = dbg.aFilt.toFixed(3);
     document.getElementById('dbgV').textContent = dbg.vFilt.toFixed(3);
+    document.getElementById('dbgAMag').textContent = dbg.aMagFilt.toFixed(3);
     aPeakHold = Math.max(Math.abs(dbg.aFilt), aPeakHold * PEAK_HOLD_DECAY);
     vPeakHold = Math.max(Math.abs(dbg.vFilt), vPeakHold * PEAK_HOLD_DECAY);
     document.getElementById('dbgAPeak').textContent = 'peak ' + aPeakHold.toFixed(3);
@@ -591,7 +599,11 @@ function createEngine(opts) {
     }
 
     const aVal = acc[axisPicked] || 0;
-    engine.ingest(t, aVal);
+    // Total vector magnitude vs. gravity (~9.81 m/s²) — used only for "at rest" detection,
+    // since it stays accurate even as the phone's orientation shifts slightly during a rep.
+    const rawMag = Math.sqrt((raw.x || 0) ** 2 + (raw.y || 0) ** 2 + (raw.z || 0) ** 2);
+    const aMagVal = rawMag - 9.81;
+    engine.ingest(t, aVal, aMagVal);
   }
 
   permitBtn.addEventListener('click', function() {
