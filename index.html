@@ -79,9 +79,16 @@
 
   .empty-note { color:var(--dim); font-size:12px; text-align:center; padding:12px 0; }
   footer { text-align:center; font-family:var(--mono); font-size:9px; color:var(--dim); margin-top:20px; letter-spacing:.04em; }
+
+  .flash-overlay { position:fixed; inset:0; background:var(--bad); opacity:0; pointer-events:none; z-index:999; }
+  .flash-overlay.on { animation:flashPulse 0.5s ease-out; }
+  @keyframes flashPulse { 0%{opacity:0.8} 100%{opacity:0} }
+
+  .coach-line { font-size:12px; text-align:center; margin-top:10px; padding-top:10px; border-top:1px solid var(--line); }
 </style>
 </head>
 <body>
+<div class="flash-overlay" id="flashOverlay"></div>
 <div class="wrap">
 
   <header>
@@ -117,6 +124,7 @@
     <div class="live-row">
       <div class="live-box"><div class="lbl">Phase</div><div class="val phase-idle" id="livePhase">idle</div></div>
       <div class="live-box"><div class="lbl">Rep</div><div class="val" id="liveRep">0</div></div>
+      <div class="live-box"><div class="lbl">Pause</div><div class="val" id="livePause">—</div></div>
     </div>
   </div>
 
@@ -150,6 +158,7 @@
       <div class="sub-score"><span class="k">avg smooth</span><span class="v" id="summarySmooth">—</span></div>
       <div class="sub-score"><span class="k">avg control</span><span class="v" id="summaryControl">—</span></div>
     </div>
+    <div class="coach-line" id="coachLine" style="display:none;"></div>
   </div>
 
   <div class="panel">
@@ -175,6 +184,7 @@ function createEngine(opts) {
   let belowSince = null, belowASince = null, phaseStartT = null, movingSinceT = null, phaseSamples = [];
   let phasePeakAbsV = 0;
   let completedPhases = [], reps = [], romHistory = [], maxAbsA = 0.001;
+  let pauseStartT = null, pauseDurations = [];
 
   function finishPhase(tNow) {
     if (phaseSamples.length < 2) { phaseSamples = []; return null; }
@@ -284,6 +294,7 @@ function createEngine(opts) {
       }
     }
     state = 'paused';
+    pauseStartT = t;
   }
 
   function ingest(t, aRaw) {
@@ -329,6 +340,7 @@ function createEngine(opts) {
     if (fire && state === 'moving') {
       confirmPause(t);
     } else if (state !== 'moving' && !bothQuiet) {
+      if (pauseStartT !== null) { pauseDurations.push((t - pauseStartT) / 1000); pauseStartT = null; }
       state = 'moving'; phaseStartT = t; movingSinceT = t; phaseSamples = []; phasePeakAbsV = 0;
     }
     if (state === 'moving') phaseSamples.push({ t, v: vFilt, a: aFilt });
@@ -337,6 +349,8 @@ function createEngine(opts) {
 
   return { ingest, getReps: () => reps, getState: () => state,
     dropLastRep: () => { reps.pop(); },
+    getPauseDurations: () => pauseDurations,
+    getCurrentPauseElapsed: (tNow) => (state === 'paused' && pauseStartT !== null) ? (tNow - pauseStartT) / 1000 : 0,
     getDebug: () => ({ aFilt, vFilt, atRest: Math.abs(aFilt) < cfg.aThresh }) };
 }
 
@@ -352,9 +366,17 @@ function createEngine(opts) {
   const errBox = document.getElementById('errBox');
   const livePhase = document.getElementById('livePhase');
   const liveRep = document.getElementById('liveRep');
+  const livePause = document.getElementById('livePause');
   const summaryNum = document.getElementById('summaryNum');
   const summaryLbl = document.getElementById('summaryLbl');
   const repList = document.getElementById('repList');
+  const flashOverlay = document.getElementById('flashOverlay');
+  const coachLine = document.getElementById('coachLine');
+
+  const PAUSE_FLASH_THRESHOLD_S = 2.5;
+  function triggerFlash() {
+    flashOverlay.classList.remove('on'); void flashOverlay.offsetWidth; flashOverlay.classList.add('on');
+  }
 
   let engine = null;
   let sensorsReady = false;
@@ -363,6 +385,7 @@ function createEngine(opts) {
   let calibBuffer = { x: [], y: [], z: [] };
   let calibDeadline = 0;
   let lastRepsCount = 0;
+  let pauseAlreadyFlashed = false; // resets whenever we leave the paused state, so each new pause can flash once
   let gravityEst = null; // slow-tracking gravity estimate per axis — computed ourselves, not trusted from the browser
   const GRAVITY_ALPHA = 0.04; // gated to pauses only now, so can track a bit faster
   // Peak-hold meters for the debug readout: jump instantly to a new peak,
@@ -449,12 +472,30 @@ function createEngine(opts) {
     repList.prepend(div);
   }
 
+  // Succinct pass/fail readout on pause length: the coaching takeaway a client should
+  // walk away with, not a full breakdown — either "shorten your pauses" or "you're good."
+  function updateCoachLine() {
+    const pauseDurations = engine.getPauseDurations();
+    if (pauseDurations.length === 0) { coachLine.style.display = 'none'; return; }
+    const longPauses = pauseDurations.filter(d => d > PAUSE_FLASH_THRESHOLD_S);
+    coachLine.style.display = 'block';
+    if (longPauses.length > 0) {
+      const longest = Math.max(...longPauses);
+      coachLine.className = 'coach-line score-bad';
+      coachLine.textContent = `Work on: pauses — ${longPauses.length}/${pauseDurations.length} ran past ${PAUSE_FLASH_THRESHOLD_S}s (longest ${longest.toFixed(1)}s)`;
+    } else {
+      coachLine.className = 'coach-line score-good';
+      coachLine.textContent = `Pauses on point — all ${pauseDurations.length} stayed under ${PAUSE_FLASH_THRESHOLD_S}s`;
+    }
+  }
+
   function updateSummary() {
     const reps = engine.getReps();
     if (reps.length === 0) {
       summaryNum.textContent = '—'; summaryLbl.textContent = 'no reps yet';
       document.getElementById('summarySmooth').textContent = '—';
       document.getElementById('summaryControl').textContent = '—';
+      coachLine.style.display = 'none';
       return;
     }
     const avg = reps.reduce((a,r)=>a+r.composite,0) / reps.length;
@@ -470,6 +511,7 @@ function createEngine(opts) {
     smoothEl.className = 'v ' + scoreClass(avgSmooth);
     controlEl.textContent = avgControl.toFixed(0);
     controlEl.className = 'v ' + scoreClass(avgControl);
+    updateCoachLine();
   }
 
   function tick() {
@@ -488,6 +530,21 @@ function createEngine(opts) {
     const dbgRestEl = document.getElementById('dbgRest');
     dbgRestEl.textContent = dbg.atRest ? 'yes' : 'no';
     dbgRestEl.className = 'val ' + (dbg.atRest ? 'phase-moving' : 'phase-idle');
+
+    if (st === 'paused') {
+      const elapsed = engine.getCurrentPauseElapsed(performance.now());
+      livePause.textContent = elapsed.toFixed(1) + 's';
+      livePause.className = 'val ' + (elapsed > PAUSE_FLASH_THRESHOLD_S ? 'phase-paused' : '');
+      if (elapsed > PAUSE_FLASH_THRESHOLD_S && !pauseAlreadyFlashed) {
+        pauseAlreadyFlashed = true;
+        triggerFlash();
+      }
+    } else {
+      livePause.textContent = '—';
+      livePause.className = 'val';
+      pauseAlreadyFlashed = false;
+    }
+    updateCoachLine();
 
     const reps = engine.getReps();
     liveRep.textContent = reps.length;
@@ -587,10 +644,12 @@ function createEngine(opts) {
     calibDeadline = performance.now() + 1500;
     lastRepsCount = 0;
     aPeakHold = 0; vPeakHold = 0;
+    pauseAlreadyFlashed = false;
     gravityEst = null;
     setActive = true;
     repList.innerHTML = '<div class="empty-note">Calibrating axis — move through one rep now…</div>';
     summaryNum.textContent = '—'; summaryLbl.textContent = 'no reps yet';
+    coachLine.style.display = 'none';
     statusText.textContent = 'recording';
     startSetBtn.style.display = 'none';
     stopSetBtn.style.display = 'block';
@@ -626,6 +685,9 @@ function createEngine(opts) {
     summaryNum.textContent = '—'; summaryLbl.textContent = 'no reps yet';
     document.getElementById('summarySmooth').textContent = '—';
     document.getElementById('summaryControl').textContent = '—';
+    coachLine.style.display = 'none';
+    livePause.textContent = '—'; livePause.className = 'val';
+    pauseAlreadyFlashed = false;
     stopSetBtn.style.display = 'none';
     startSetBtn.style.display = 'block';
     startSetBtn.disabled = !sensorsReady;
