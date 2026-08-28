@@ -167,7 +167,7 @@
       <div class="live-box"><div class="lbl">velocity</div><div class="val" id="dbgV" style="font-size:13px">—</div><div style="font-size:10px;color:var(--dim);margin-top:2px;" id="dbgVPeak">peak —</div></div>
     </div>
     <div class="warn-note" id="weakSignalNote"></div>
-    <div style="font-size:11px;color:var(--dim);margin-top:8px;line-height:1.4;">On Start Set the app measures your rig's sensor noise while you hold still, then sets the motion threshold to 3&times; that (never below the minimum above). Watch <b>vert. accel</b> peak during a rep — it must clearly beat <b>eff. thresh</b> or reps get missed. Guide at a 4&nbsp;s tempo: 300&nbsp;mm stroke peaks near 0.09&nbsp;m/s² (comfortable), 150&nbsp;mm near 0.046 (marginal), 100&nbsp;mm near 0.031 (borderline). Shorter or slower needs a firmer mount or a quicker tempo.</div>
+    <div style="font-size:11px;color:var(--dim);margin-top:8px;line-height:1.4;">On Start Set the app measures your rig's sensor noise while you hold still, then sets the motion threshold to 3&times; that (never below the minimum above). It keeps re-measuring during every pause, so it tunes itself to each machine — the dot-number beside noise&nbsp;σ counts those updates. No per-machine setup needed. Watch <b>vert. accel</b> peak during a rep — it must clearly beat <b>eff. thresh</b> or reps get missed. Guide at a 4&nbsp;s tempo: 300&nbsp;mm stroke peaks near 0.09&nbsp;m/s² (comfortable), 150&nbsp;mm near 0.046 (marginal), 100&nbsp;mm near 0.031 (borderline). Shorter or slower needs a firmer mount or a quicker tempo.</div>
   </div>
 
   <div class="panel">
@@ -192,6 +192,21 @@
 </div>
 
 <script>
+// Noise measured from SUCCESSIVE DIFFERENCES rather than spread about the mean. Sensor noise
+// is fast; a rep is slow, changing by ~1% of its amplitude between samples. Differencing
+// therefore sees essentially only the noise, which matters because the app cannot assume the
+// samples it is measuring are motionless: whenever the threshold is set too high the rep reads
+// as "still", and a spread-based estimate would fold that rep into the noise floor, holding the
+// threshold high and permanently locking the app out of detecting anything.
+function noiseSigmaFromDiffs(buf) {
+  if (buf.length < 8) return null;
+  const d = [];
+  for (let i = 1; i < buf.length; i++) d.push(buf[i] - buf[i-1]);
+  const m = d.reduce((a,b)=>a+b,0) / d.length;
+  const varr = d.reduce((a,b)=>a+(b-m)*(b-m),0) / d.length;
+  return Math.sqrt(varr / 2);   // white noise: var(difference) = 2 * var(sample)
+}
+
 // ---------- Rep detection + scoring engine ----------
 // The one input signal is SIGNED VERTICAL ACCELERATION, derived as (|raw accel| - g).
 // For a phone travelling with a weight stack this is exact: proper acceleration is g + a,
@@ -227,6 +242,12 @@ function createEngine(opts) {
   let phasePeakAbsV = 0, phaseDirSign = 0;
   let reps = [], romHistory = [], maxAbsA = 0.001;
   let pauseStartT = null, pauseDurations = [];
+  // In-set noise re-estimation. The pre-set "hold still" reading is taken before the machine
+  // is loaded and moving; a stack that is silent at rest can still rattle once it is running,
+  // and gym-floor conditions change mid-set. Every confirmed pause is a fresh, in-situ sample
+  // of "what does quiet actually look like on THIS machine right now", so the threshold keeps
+  // tracking the equipment instead of relying on one snapshot.
+  let pauseNoiseBuf = [], noiseAdaptCount = 0;
   // Phases are labelled by DIRECTION, not by counting. The first phase seen defines "phase 1"
   // and anything travelling the other way is phase 2. Pure counting loses sync permanently if
   // one phase is ever missed; direction re-syncs itself on the very next phase.
@@ -353,6 +374,27 @@ function createEngine(opts) {
     }
     state = 'paused';
     pauseStartT = motionEndT;
+    pauseNoiseBuf = [];   // collection starts from the next sample, by which point the pause
+                          // is already confirmed and the filters have settled
+  }
+
+  // Fold a fresh quiet reading into the noise estimate. This runs off ANY non-moving stretch,
+  // not just confirmed pauses: if the pre-set reading overestimated the noise, no rep would
+  // ever clear the threshold, so waiting for a completed pause to correct it would deadlock
+  // the very case that most needs correcting. Adaptation is two-way — a machine noisier than
+  // its resting reading also gets tracked — with only clear impacts rejected as outliers.
+  function adaptNoise() {
+    if (pauseNoiseBuf.length < 30) return;
+    const sigma = noiseSigmaFromDiffs(pauseNoiseBuf);
+    pauseNoiseBuf = [];
+    if (sigma === null) return;
+    if (noiseSigma > 0 && sigma > noiseSigma * 4) return;   // a bump or knock, not the floor
+    // Deliberately asymmetric. Overestimating the noise makes the app deaf to real reps and is
+    // the failure worth escaping quickly; underestimating only risks a false start, which the
+    // velocity gate and start debounce already absorb. So: drop fast, rise slowly.
+    const w = (noiseSigma > 0 && sigma < noiseSigma) ? 0.5 : 0.15;
+    noiseSigma = noiseSigma > 0 ? ((1 - w) * noiseSigma + w * sigma) : sigma;
+    noiseAdaptCount++;
   }
 
   function ingest(t, aVert) {
@@ -405,11 +447,13 @@ function createEngine(opts) {
     } else if (state !== 'moving' && aboveSince !== null && (t - aboveSince) >= cfg.startDebounceMs) {
       // Debounced against a single noise spike, but the phase is dated from aboveSince — the
       // real first movement — so the debounce costs robustness nothing in timing accuracy.
+      pauseNoiseBuf = [];   // discard the partial window that runs into this movement
       if (pauseStartT !== null) { pauseDurations.push((aboveSince - pauseStartT) / 1000); pauseStartT = null; }
       state = 'moving'; phaseStartT = aboveSince; movingSinceT = aboveSince; phaseSamples = [];
       phasePeakAbsV = 0; phaseDirSign = 0;
     }
-    if (state === 'moving') phaseSamples.push({ t, v: vFilt, a: aFilt });
+    if (state === 'moving') { phaseSamples.push({ t, v: vFilt, a: aFilt }); pauseNoiseBuf = []; }
+    else if (aQuiet) { pauseNoiseBuf.push(aVert); adaptNoise(); }
     lastT = t; lastA = aFilt;
   }
 
@@ -437,7 +481,7 @@ function createEngine(opts) {
     setNoiseFloor: (s) => { noiseSigma = s; },
     getPauseDurations: () => pauseDurations,
     getDebug: () => ({ aFilt, vFilt, noiseSigma, thresh: effThresh(), setMaxA: maxAbsA,
-      atRest: Math.abs(aFilt) < effThresh() }) };
+      noiseAdaptCount, atRest: Math.abs(aFast) < effThresh() }) };
 }
 
 // ---------- UI wiring ----------
@@ -626,7 +670,8 @@ function createEngine(opts) {
     const dbg = engine.getDebug();
     document.getElementById('dbgA').textContent = dbg.aFilt.toFixed(4);
     document.getElementById('dbgV').textContent = dbg.vFilt.toFixed(4);
-    document.getElementById('dbgNoise').textContent = dbg.noiseSigma.toFixed(4);
+    document.getElementById('dbgNoise').textContent = dbg.noiseSigma.toFixed(4)
+      + (dbg.noiseAdaptCount > 0 ? ' ·' + dbg.noiseAdaptCount : '');
     document.getElementById('dbgThresh').textContent = dbg.thresh.toFixed(4);
     vPeakHold = Math.max(Math.abs(dbg.vFilt), vPeakHold * PEAK_HOLD_DECAY);
     // Set max, not a decaying meter: the question this answers is "did this rig EVER produce
@@ -687,8 +732,17 @@ function createEngine(opts) {
     if (calibrating) {
       stillBuf.push(aVert);
       if (t < stillDeadline) return;
-      const m = stillBuf.reduce((a,b)=>a+b,0) / stillBuf.length;
-      const sigma = Math.sqrt(stillBuf.reduce((a,b)=>a+(b-m)*(b-m),0) / stillBuf.length);
+      // Median across sub-windows, so a plate dropped nearby during calibration cannot inflate
+      // the estimate for the whole set and leave the app deaf to every rep in it.
+      const CHUNKS = 5, per = Math.floor(stillBuf.length / CHUNKS);
+      const sigmas = [];
+      for (let c = 0; c < CHUNKS && per >= 8; c++) {
+        const s = noiseSigmaFromDiffs(stillBuf.slice(c * per, (c + 1) * per));
+        if (s !== null) sigmas.push(s);
+      }
+      let sigma;
+      if (sigmas.length) { sigmas.sort((a,b)=>a-b); sigma = sigmas[Math.floor(sigmas.length/2)]; }
+      else sigma = noiseSigmaFromDiffs(stillBuf) || 0;
       engine.setNoiseFloor(sigma);
       calibrating = false;
       statusText.textContent = 'recording';
