@@ -13,7 +13,6 @@
     --ink: #FFFFFF;
     --dim: #9fc3de;
     --accent: #A9E154;
-    --accent-dim: #4f6b2e;
     --warn: #f0a860;
     --bad: #ff6b5e;
     --mono: 'SF Mono', Menlo, Consolas, monospace;
@@ -60,6 +59,17 @@
   .phase-paused { color:var(--warn); }
   .phase-idle { color:var(--dim); }
 
+  /* Tempo bar fills toward the current phase's target, so "am I on pace" reads at a glance
+     from across a gym floor instead of needing the number to be parsed. */
+  .phase-big { text-align:center; font-family:var(--mono); font-size:26px; font-weight:700;
+    letter-spacing:.04em; margin:4px 0 2px; }
+  .phase-time { text-align:center; font-family:var(--mono); font-size:13px; color:var(--dim); margin-bottom:10px; }
+  .tempo-track { position:relative; height:12px; background:var(--bg-deep); border:1px solid var(--line);
+    border-radius:6px; overflow:hidden; }
+  .tempo-fill { height:100%; width:0%; background:var(--accent); transition:width .06s linear; }
+  .tempo-fill.over { background:var(--bad); }
+  .tempo-fill.pause { background:var(--warn); }
+
   .summary-score { text-align:center; padding:6px 0 4px; }
   .summary-score .num { font-family:var(--mono); font-size:48px; font-weight:700; line-height:1; }
   .summary-score .lbl { font-size:12px; color:var(--dim); margin-top:6px; }
@@ -72,19 +82,23 @@
   .sub-score { display:flex; justify-content:space-between; font-size:11px; }
   .sub-score .k { color:var(--dim); font-family:var(--mono); }
   .sub-score .v { font-family:var(--mono); font-weight:600; }
+  .phase-times { grid-column:span 2; font-family:var(--mono); font-size:10px; color:var(--dim);
+    border-top:1px solid var(--line); margin-top:4px; padding-top:6px; text-align:center; }
 
   .score-good { color:var(--accent); }
   .score-mid { color:var(--warn); }
   .score-bad { color:var(--bad); }
 
   .empty-note { color:var(--dim); font-size:12px; text-align:center; padding:12px 0; }
-  footer { text-align:center; font-family:var(--mono); font-size:9px; color:var(--dim); margin-top:20px; letter-spacing:.04em; }
+  footer { text-align:center; font-family:var(--mono); font-size:9px; color:var(--dim); margin-top:20px; letter-spacing:.04em; line-height:1.5; }
 
   .flash-overlay { position:fixed; inset:0; background:var(--bad); opacity:0; pointer-events:none; z-index:999; }
   .flash-overlay.on { animation:flashPulse 0.5s ease-out; }
   @keyframes flashPulse { 0%{opacity:0.8} 100%{opacity:0} }
 
   .coach-line { font-size:12px; text-align:center; margin-top:10px; padding-top:10px; border-top:1px solid var(--line); }
+  .warn-note { background:rgba(240,168,96,.1); border:1px solid var(--warn); color:var(--warn);
+    padding:10px 12px; border-radius:8px; font-size:11px; line-height:1.4; margin-top:10px; display:none; }
 </style>
 </head>
 <body>
@@ -93,12 +107,12 @@
 
   <header>
     <div>
-      <div class="brand">Prototype · V1</div>
+      <div class="brand">Prototype · V2</div>
       <h1>Rep Quality Scorer</h1>
     </div>
     <div class="status-row">
       <div><span class="status-dot" id="statusDot"></span><span id="statusText">idle</span></div>
-      <div id="axisText">axis —</div>
+      <div id="signalText">signal —</div>
     </div>
   </header>
 
@@ -121,10 +135,13 @@
 
   <div class="panel">
     <div class="panel-title">Live</div>
-    <div class="live-row">
-      <div class="live-box"><div class="lbl">Phase</div><div class="val phase-idle" id="livePhase">idle</div></div>
+    <div class="phase-big phase-idle" id="phaseBig">IDLE</div>
+    <div class="phase-time" id="phaseTime">—</div>
+    <div class="tempo-track"><div class="tempo-fill" id="tempoFill"></div></div>
+    <div class="live-row" style="margin-top:10px;">
       <div class="live-box"><div class="lbl">Rep</div><div class="val" id="liveRep">0</div></div>
-      <div class="live-box"><div class="lbl">Pause</div><div class="val" id="livePause">—</div></div>
+      <div class="live-box"><div class="lbl">Last P1</div><div class="val" id="lastP1" style="font-size:14px">—</div></div>
+      <div class="live-box"><div class="lbl">Last P2</div><div class="val" id="lastP2" style="font-size:14px">—</div></div>
     </div>
   </div>
 
@@ -137,18 +154,20 @@
   <div class="panel">
     <div class="panel-title">Debug / Tuning</div>
     <div class="tempo-grid" style="grid-template-columns:1fr 1fr;">
-      <div class="tempo-field"><label>Accel thresh</label><input type="number" id="aThreshIn" value="0.5" step="0.05" min="0.02"></div>
+      <div class="tempo-field"><label>Min accel thresh</label><input type="number" id="aThreshIn" value="0.02" step="0.005" min="0.005"></div>
       <div class="tempo-field"><label>Pause hold (ms)</label><input type="number" id="pauseHoldIn" value="300" step="25" min="150"></div>
     </div>
     <div class="live-row" style="margin-top:10px;">
-      <div class="live-box"><div class="lbl">aFilt (peak)</div><div class="val" id="dbgA" style="font-size:13px">—</div><div style="font-size:10px;color:var(--dim);margin-top:2px;" id="dbgAPeak">peak —</div></div>
-      <div class="live-box"><div class="lbl">vFilt (peak)</div><div class="val" id="dbgV" style="font-size:13px">—</div><div style="font-size:10px;color:var(--dim);margin-top:2px;" id="dbgVPeak">peak —</div></div>
-    </div>
-    <div class="live-row" style="margin-top:6px;">
-      <div class="live-box"><div class="lbl">|a| vs gravity</div><div class="val" id="dbgAMag" style="font-size:13px">—</div></div>
+      <div class="live-box"><div class="lbl">noise σ</div><div class="val" id="dbgNoise" style="font-size:13px">—</div></div>
+      <div class="live-box"><div class="lbl">eff. thresh</div><div class="val" id="dbgThresh" style="font-size:13px">—</div></div>
       <div class="live-box"><div class="lbl">At Rest</div><div class="val" id="dbgRest" style="font-size:13px">—</div></div>
     </div>
-    <div style="font-size:11px;color:var(--dim);margin-top:8px;line-height:1.4;">The top number updates every frame and will flicker with sensor noise — read the smaller "peak" number underneath instead, which holds the highest value briefly before decaying, so it's actually readable while lifting. "At Rest" is judged from |a| vs gravity, which should settle near 0 whenever you're actually still — if it never drops below Accel thresh, raise the threshold slightly. Velocity is judged relative to each phase's own peak, so it adapts automatically to slow/light vs fast/heavy reps.</div>
+    <div class="live-row" style="margin-top:6px;">
+      <div class="live-box"><div class="lbl">vert. accel</div><div class="val" id="dbgA" style="font-size:13px">—</div><div style="font-size:10px;color:var(--dim);margin-top:2px;" id="dbgAPeak">peak —</div></div>
+      <div class="live-box"><div class="lbl">velocity</div><div class="val" id="dbgV" style="font-size:13px">—</div><div style="font-size:10px;color:var(--dim);margin-top:2px;" id="dbgVPeak">peak —</div></div>
+    </div>
+    <div class="warn-note" id="weakSignalNote"></div>
+    <div style="font-size:11px;color:var(--dim);margin-top:8px;line-height:1.4;">On Start Set the app measures your rig's sensor noise while you hold still, then sets the motion threshold to 3&times; that (never below the minimum above). It keeps re-measuring during every pause, so it tunes itself to each machine — the dot-number beside noise&nbsp;σ counts those updates. No per-machine setup needed. Watch <b>vert. accel</b> peak during a rep — it must clearly beat <b>eff. thresh</b> or reps get missed. Guide at a 4&nbsp;s tempo: 300&nbsp;mm stroke peaks near 0.09&nbsp;m/s² (comfortable), 150&nbsp;mm near 0.046 (marginal), 100&nbsp;mm near 0.031 (borderline). Shorter or slower needs a firmer mount or a quicker tempo.</div>
   </div>
 
   <div class="panel">
@@ -158,8 +177,8 @@
       <div class="lbl" id="summaryLbl">no reps yet</div>
     </div>
     <div class="sub-scores" style="margin-top:10px;">
+      <div class="sub-score"><span class="k">avg tempo</span><span class="v" id="summaryTempo">—</span></div>
       <div class="sub-score"><span class="k">avg smooth</span><span class="v" id="summarySmooth">—</span></div>
-      <div class="sub-score"><span class="k">avg control</span><span class="v" id="summaryControl">—</span></div>
     </div>
     <div class="coach-line" id="coachLine" style="display:none;"></div>
   </div>
@@ -169,26 +188,72 @@
     <div id="repList"><div class="empty-note">Reps will appear here as you complete them.</div></div>
   </div>
 
-  <footer>Runs entirely on-device · mount phone rigidly to the stack carrier · v1 thresholds will need tuning against real reps</footer>
+  <footer>Runs entirely on-device · mount the phone rigidly to the stack carrier<br>Reads travel along gravity — built for vertical stacks, not horizontal-only machines</footer>
 </div>
 
 <script>
+// Noise measured from SUCCESSIVE DIFFERENCES rather than spread about the mean. Sensor noise
+// is fast; a rep is slow, changing by ~1% of its amplitude between samples. Differencing
+// therefore sees essentially only the noise, which matters because the app cannot assume the
+// samples it is measuring are motionless: whenever the threshold is set too high the rep reads
+// as "still", and a spread-based estimate would fold that rep into the noise floor, holding the
+// threshold high and permanently locking the app out of detecting anything.
+function noiseSigmaFromDiffs(buf) {
+  if (buf.length < 8) return null;
+  const d = [];
+  for (let i = 1; i < buf.length; i++) d.push(buf[i] - buf[i-1]);
+  const m = d.reduce((a,b)=>a+b,0) / d.length;
+  const varr = d.reduce((a,b)=>a+(b-m)*(b-m),0) / d.length;
+  return Math.sqrt(varr / 2);   // white noise: var(difference) = 2 * var(sample)
+}
+
 // ---------- Rep detection + scoring engine ----------
+// The one input signal is SIGNED VERTICAL ACCELERATION, derived as (|raw accel| - g).
+// For a phone travelling with a weight stack this is exact: proper acceleration is g + a,
+// so its magnitude minus g leaves a. Crucially it needs no running gravity estimate, so it
+// cannot accumulate tilt error — which is what previously let velocity ramp away forever.
 function createEngine(opts) {
   const cfg = Object.assign({
-    vThreshFloor: 0.01, velRelFrac: 0.25, aThresh: 0.5, pauseHoldMs: 300, graceMs: 500,
-    minPhaseMs: 800, lpAlpha: 0.25,
+    vThreshFloor: 0.005, velRelFrac: 0.25,
+    aThreshFloor: 0.02,   // absolute minimum "quiet" threshold, from the UI
+    noiseK: 3,            // effective threshold = max(floor, noiseK × measured still-noise σ)
+    pauseHoldMs: 300, graceMs: 500, startDebounceMs: 60,
+    minPhaseMs: 800, lpAlpha: 0.25, lpAlphaFast: 0.6,
     phase1Target: 4, pause1Target: 2, phase2Target: 4, pause2Target: 2,
     tempoTolerance: 0.6
   }, opts || {});
 
+  // A phase's acceleration passes through zero at its own midpoint, and on a slow tempo that
+  // quiet stretch can last well over a second. The escape hatch below must therefore outlast
+  // any legitimate mid-stroke crossing, so it scales with the slowest phase being coached.
+  const longQuietMs = Math.max(cfg.pauseHoldMs * 3,
+    0.75 * Math.max(cfg.phase1Target, cfg.phase2Target) * 1000);
+
   let state = 'idle';
-  let vFilt = 0, aFilt = 0, v = 0, lastT = null, lastA = 0;
-  let aMagFilt = 0; // low-passed |raw accel vector| - gravity — orientation-independent "at rest" signal
-  let belowSince = null, belowASince = null, phaseStartT = null, movingSinceT = null, phaseSamples = [];
-  let phasePeakAbsV = 0;
-  let completedPhases = [], reps = [], romHistory = [], maxAbsA = 0.001;
+  let aFilt = 0, v = 0, vFilt = 0, lastT = null, lastA = 0;
+  // Two filters on purpose. aFilt (heavy) feeds velocity and the smoothness scores, where
+  // noise rejection matters. aFast (light) decides moving-vs-still, where LAG is what hurts:
+  // a heavily-filtered signal decays toward the threshold slowly at a phase's end but crosses
+  // it fast at the start, and that asymmetry alone stretched every reported phase by ~0.4s.
+  let aFast = 0;
+  let noiseSigma = 0;
+  let belowSince = null, belowASince = null, aboveSince = null;
+  let phaseStartT = null, movingSinceT = null, phaseSamples = [];
+  let phasePeakAbsV = 0, phaseDirSign = 0;
+  let reps = [], romHistory = [], maxAbsA = 0.001;
   let pauseStartT = null, pauseDurations = [];
+  // In-set noise re-estimation. The pre-set "hold still" reading is taken before the machine
+  // is loaded and moving; a stack that is silent at rest can still rattle once it is running,
+  // and gym-floor conditions change mid-set. Every confirmed pause is a fresh, in-situ sample
+  // of "what does quiet actually look like on THIS machine right now", so the threshold keeps
+  // tracking the equipment instead of relying on one snapshot.
+  let pauseNoiseBuf = [], noiseAdaptCount = 0;
+  // Phases are labelled by DIRECTION, not by counting. The first phase seen defines "phase 1"
+  // and anything travelling the other way is phase 2. Pure counting loses sync permanently if
+  // one phase is ever missed; direction re-syncs itself on the very next phase.
+  let p1Dir = null, pendingP1 = null;
+
+  function effThresh() { return Math.max(cfg.aThreshFloor, cfg.noiseK * noiseSigma); }
 
   function finishPhase(tNow) {
     if (phaseSamples.length < 2) { phaseSamples = []; return null; }
@@ -208,9 +273,11 @@ function createEngine(opts) {
     const endAbsA = endWindow.length
       ? endWindow.reduce((a,s)=>a+Math.abs(s.a),0)/endWindow.length
       : Math.abs(phaseSamples[phaseSamples.length-1].a);
-    const dir = pos >= 0 ? 1 : -1;
-    // Hard mechanical ceiling: this rig cannot travel more than 300mm in either
-    // direction, so any drift-inflated estimate beyond that is a sensor artifact, not real motion.
+    // Direction comes from the velocity PEAK, not integrated position: the peak is reached
+    // long before drift accumulates, so its sign is the part worth trusting.
+    const dir = phaseDirSign !== 0 ? phaseDirSign : (pos >= 0 ? 1 : -1);
+    // Hard mechanical ceiling: the holder cannot travel more than 300mm in either direction,
+    // so any drift-inflated estimate beyond that is a sensor artifact, not real motion.
     const MAX_STROKE_M = 0.3;
     pos = Math.max(-MAX_STROKE_M, Math.min(MAX_STROKE_M, pos));
     const samples = phaseSamples;
@@ -218,9 +285,9 @@ function createEngine(opts) {
     return { duration, rom: Math.abs(pos), peakAbsV, jerkRms, endAbsA, dir, samples };
   }
 
-  // Resamples a rep's raw (uneven, real-time) velocity samples onto a fixed number of
-  // points spread evenly over the rep's own duration — so reps of different lengths can
-  // still be overlaid and averaged point-for-point on a shared 0-100% axis.
+  // Resamples a rep's raw (uneven, real-time) velocity samples onto a fixed number of points
+  // spread evenly over the rep's own duration — so reps of different lengths can still be
+  // overlaid and averaged point-for-point on a shared 0-100% axis.
   function buildTrace(p1, p2) {
     if (p1.samples.length < 2 || p2.samples.length < 2) return null;
     const t1Start = p1.samples[0].t;
@@ -278,7 +345,10 @@ function createEngine(opts) {
     };
     const controlScore = (controlScoreOf(p1) + controlScoreOf(p2)) / 2;
 
-    const composite = romScore*0.25 + tempoScore*0.25 + smoothScore*0.25 + controlScore*0.25;
+    // Weighted toward what this rig can actually measure well. Phase timing is solid; ROM
+    // from double-integrated acceleration is the least trustworthy number here, so it only
+    // nudges the score rather than driving it.
+    const composite = romScore*0.10 + tempoScore*0.45 + smoothScore*0.25 + controlScore*0.20;
     const built = buildTrace(p1, p2);
     return { romScore, tempoScore, smoothScore, controlScore, composite,
       phase1Duration: p1.duration, phase2Duration: p2.duration,
@@ -286,101 +356,159 @@ function createEngine(opts) {
       trace: built ? built.trace : null, phase1Frac: built ? built.phase1Frac : null };
   }
 
-  function confirmPause(t) {
+  // motionEndT is when the client actually stopped, which is when quiet BEGAN — not when the
+  // pause was confirmed a hold-period later. Timing the phase to the confirmation instead
+  // would inflate every reported phase by the hold plus filter lag (~0.7s at a 4s tempo),
+  // which is exactly the number the tempo score is judged on.
+  function confirmPause(t, motionEndT) {
     v = 0; vFilt = 0;
-    const phase = finishPhase(t);
+    const phase = finishPhase(motionEndT);
     if (phase) {
-      completedPhases.push(phase);
-      if (completedPhases.length >= 2) {
-        const p2 = completedPhases.pop();
-        const p1 = completedPhases.pop();
-        reps.push(packageRep(p1, p2));
+      if (p1Dir === null) p1Dir = phase.dir;
+      if (phase.dir === p1Dir) {
+        pendingP1 = phase;                 // opens a rep
+      } else if (pendingP1) {
+        reps.push(packageRep(pendingP1, phase));
+        pendingP1 = null;                  // closes it
       }
     }
     state = 'paused';
-    pauseStartT = t;
+    pauseStartT = motionEndT;
+    pauseNoiseBuf = [];   // collection starts from the next sample, by which point the pause
+                          // is already confirmed and the filters have settled
   }
 
-  function ingest(t, aRaw, aMagRaw) {
-    if (lastT === null) { lastT = t; lastA = aRaw; aFilt = aRaw; aMagFilt = aMagRaw || 0; return; }
+  // Fold a fresh quiet reading into the noise estimate. This runs off ANY non-moving stretch,
+  // not just confirmed pauses: if the pre-set reading overestimated the noise, no rep would
+  // ever clear the threshold, so waiting for a completed pause to correct it would deadlock
+  // the very case that most needs correcting. Adaptation is two-way — a machine noisier than
+  // its resting reading also gets tracked — with only clear impacts rejected as outliers.
+  function adaptNoise() {
+    if (pauseNoiseBuf.length < 30) return;
+    const sigma = noiseSigmaFromDiffs(pauseNoiseBuf);
+    pauseNoiseBuf = [];
+    if (sigma === null) return;
+    if (noiseSigma > 0 && sigma > noiseSigma * 4) return;   // a bump or knock, not the floor
+    // Deliberately asymmetric. Overestimating the noise makes the app deaf to real reps and is
+    // the failure worth escaping quickly; underestimating only risks a false start, which the
+    // velocity gate and start debounce already absorb. So: drop fast, rise slowly.
+    const w = (noiseSigma > 0 && sigma < noiseSigma) ? 0.5 : 0.15;
+    noiseSigma = noiseSigma > 0 ? ((1 - w) * noiseSigma + w * sigma) : sigma;
+    noiseAdaptCount++;
+  }
+
+  function ingest(t, aVert) {
+    if (lastT === null) { lastT = t; lastA = aVert; aFilt = aVert; aFast = aVert; return; }
     const dt = (t - lastT) / 1000;
     if (dt <= 0) return;
-    aFilt = aFilt + cfg.lpAlpha * (aRaw - aFilt);
-    aMagFilt = aMagFilt + cfg.lpAlpha * ((aMagRaw || 0) - aMagFilt);
+    aFilt = aFilt + cfg.lpAlpha * (aVert - aFilt);
+    aFast = aFast + cfg.lpAlphaFast * (aVert - aFast);
     maxAbsA = Math.max(maxAbsA, Math.abs(aFilt));
     v = v + (lastA + aFilt) / 2 * dt;
     vFilt = vFilt + cfg.lpAlpha * (v - vFilt);
 
-    if (state === 'moving') phasePeakAbsV = Math.max(phasePeakAbsV, Math.abs(vFilt));
+    if (state === 'moving' && Math.abs(vFilt) > phasePeakAbsV) {
+      phasePeakAbsV = Math.abs(vFilt);
+      phaseDirSign = vFilt >= 0 ? 1 : -1;
+    }
 
-    // "At rest" is judged from the TOTAL acceleration magnitude vs. gravity, not the single
-    // gravity-subtracted axis used for velocity/direction below. A single axis's gravity share
-    // shifts with device tilt (the phone rocking slightly during a rep), which reads as false
-    // motion and can permanently prevent "quiet" from ever being detected again. Vector
-    // magnitude vs. gravity doesn't care about orientation, so it stays reliable regardless.
-    const aQuiet = Math.abs(aMagFilt) < cfg.aThresh;
+    const thr = effThresh();
+    const aQuiet = Math.abs(aFast) < thr;
+    if (aQuiet) { if (belowASince === null) belowASince = t; aboveSince = null; }
+    else { belowASince = null; if (aboveSince === null) aboveSince = t; }
+    const quietFor = belowASince === null ? 0 : (t - belowASince);
 
-    // Zero-velocity update: this must be judged from acceleration ALONE, sustained for
-    // pauseHoldMs. If it were gated behind the velocity-based "quiet" check below, a
-    // velocity that has already drifted away from zero could never look "low" relative
-    // to a normal rep's peak — meaning drift would prevent the very check meant to
-    // correct it, a permanent deadlock. Acceleration alone doesn't have this problem:
-    // real stillness always shows quiet acceleration for a sustained stretch, regardless
-    // of whatever the (possibly drifted) velocity number currently reads.
-    if (aQuiet) { if (belowASince === null) belowASince = t; } else { belowASince = null; }
-    const restConfirmed = belowASince !== null && (t - belowASince) >= cfg.pauseHoldMs;
-    if (restConfirmed) { v = 0; vFilt = 0; }
-
-    // Velocity is judged relative to THIS phase's own peak, not a fixed absolute number —
-    // this is what lets the same thresholds work whether the rep is fast/heavy or slow/light,
-    // rather than needing to be hand-tuned per exercise or per client.
+    // Velocity must ALSO be low to call a pause. Quiet acceleration alone is not enough: it
+    // happens at the midpoint of every smooth phase, where velocity is in fact at its peak.
+    // Requiring both is what separates "mid-stroke" from "actually stopped".
     const velLowBar = Math.max(cfg.vThreshFloor, cfg.velRelFrac * phasePeakAbsV);
     const velLow = Math.abs(vFilt) < velLowBar;
     const bothQuiet = aQuiet && velLow;
-
     if (bothQuiet) { if (belowSince === null) belowSince = t; } else { belowSince = null; }
+
+    // Escape hatch: quiet for longer than any mid-stroke crossing could last means a real
+    // stop, whatever the velocity estimate claims. Without it a bad velocity reading could
+    // pin the engine in "moving" indefinitely.
+    const longQuiet = quietFor >= longQuietMs;
+
+    // Zero-velocity update only while genuinely stopped — never mid-phase, or a slow rep's
+    // own midpoint would wipe out the velocity it is being measured by.
+    if (state !== 'moving' && quietFor >= cfg.pauseHoldMs) { v = 0; vFilt = 0; }
 
     const inGrace = state === 'moving' && movingSinceT !== null && (t - movingSinceT) < cfg.graceMs;
     const tooShort = state === 'moving' && phaseStartT !== null && (t - phaseStartT) < cfg.minPhaseMs;
-    const fire = !inGrace && !tooShort && belowSince !== null && (t - belowSince) >= cfg.pauseHoldMs;
+    const heldPause = belowSince !== null && (t - belowSince) >= cfg.pauseHoldMs;
+    const fire = !inGrace && !tooShort && (heldPause || longQuiet);
 
     if (fire && state === 'moving') {
-      confirmPause(t);
-    } else if (state !== 'moving' && !bothQuiet) {
-      if (pauseStartT !== null) { pauseDurations.push((t - pauseStartT) / 1000); pauseStartT = null; }
-      state = 'moving'; phaseStartT = t; movingSinceT = t; phaseSamples = []; phasePeakAbsV = 0;
+      // belowASince, not belowSince: it is the first sample of this quiet run, so it dates the
+      // stop itself rather than the later moment the velocity check also came good.
+      confirmPause(t, belowASince !== null ? belowASince : t);
+    } else if (state !== 'moving' && aboveSince !== null && (t - aboveSince) >= cfg.startDebounceMs) {
+      // Debounced against a single noise spike, but the phase is dated from aboveSince — the
+      // real first movement — so the debounce costs robustness nothing in timing accuracy.
+      pauseNoiseBuf = [];   // discard the partial window that runs into this movement
+      if (pauseStartT !== null) { pauseDurations.push((aboveSince - pauseStartT) / 1000); pauseStartT = null; }
+      state = 'moving'; phaseStartT = aboveSince; movingSinceT = aboveSince; phaseSamples = [];
+      phasePeakAbsV = 0; phaseDirSign = 0;
     }
-    if (state === 'moving') phaseSamples.push({ t, v: vFilt, a: aFilt });
+    if (state === 'moving') { phaseSamples.push({ t, v: vFilt, a: aFilt }); pauseNoiseBuf = []; }
+    else if (aQuiet) { pauseNoiseBuf.push(aVert); adaptNoise(); }
     lastT = t; lastA = aFilt;
   }
 
-  return { ingest, getReps: () => reps, getState: () => state,
+  // What the client is doing RIGHT NOW plus the target they should be hitting — the live
+  // coaching signal, independent of whether a rep has finished scoring yet.
+  function getPhaseInfo(tNow) {
+    if (state === 'moving') {
+      const dir = phaseDirSign !== 0 ? phaseDirSign : (p1Dir !== null ? p1Dir : 1);
+      const isP1 = (p1Dir === null) || (dir === p1Dir);
+      return { kind: 'move', label: isP1 ? 'PHASE 1' : 'PHASE 2',
+        target: isP1 ? cfg.phase1Target : cfg.phase2Target,
+        elapsed: phaseStartT === null ? 0 : (tNow - phaseStartT) / 1000 };
+    }
+    if (state === 'paused') {
+      const afterP1 = pendingP1 !== null;
+      return { kind: 'pause', label: afterP1 ? 'PAUSE 1' : 'PAUSE 2',
+        target: afterP1 ? cfg.pause1Target : cfg.pause2Target,
+        elapsed: pauseStartT === null ? 0 : (tNow - pauseStartT) / 1000 };
+    }
+    return { kind: 'idle', label: 'IDLE', target: 0, elapsed: 0 };
+  }
+
+  return { ingest, getReps: () => reps, getState: () => state, getPhaseInfo,
     dropLastRep: () => { reps.pop(); },
+    setNoiseFloor: (s) => { noiseSigma = s; },
     getPauseDurations: () => pauseDurations,
-    getCurrentPauseElapsed: (tNow) => (state === 'paused' && pauseStartT !== null) ? (tNow - pauseStartT) / 1000 : 0,
-    getDebug: () => ({ aFilt, vFilt, aMagFilt, atRest: Math.abs(aMagFilt) < cfg.aThresh }) };
+    getDebug: () => ({ aFilt, vFilt, noiseSigma, thresh: effThresh(), setMaxA: maxAbsA,
+      noiseAdaptCount, atRest: Math.abs(aFast) < effThresh() }) };
 }
 
 // ---------- UI wiring ----------
 (function() {
   const statusDot = document.getElementById('statusDot');
   const statusText = document.getElementById('statusText');
-  const axisText = document.getElementById('axisText');
+  const signalText = document.getElementById('signalText');
   const permitBtn = document.getElementById('permitBtn');
   const startSetBtn = document.getElementById('startSetBtn');
   const stopSetBtn = document.getElementById('stopSetBtn');
   const resetBtn = document.getElementById('resetBtn');
   const errBox = document.getElementById('errBox');
-  const livePhase = document.getElementById('livePhase');
+  const phaseBig = document.getElementById('phaseBig');
+  const phaseTime = document.getElementById('phaseTime');
+  const tempoFill = document.getElementById('tempoFill');
   const liveRep = document.getElementById('liveRep');
-  const livePause = document.getElementById('livePause');
+  const lastP1El = document.getElementById('lastP1');
+  const lastP2El = document.getElementById('lastP2');
   const summaryNum = document.getElementById('summaryNum');
   const summaryLbl = document.getElementById('summaryLbl');
   const repList = document.getElementById('repList');
   const flashOverlay = document.getElementById('flashOverlay');
   const coachLine = document.getElementById('coachLine');
+  const weakSignalNote = document.getElementById('weakSignalNote');
 
   const PAUSE_FLASH_THRESHOLD_S = 2.5;
+  const TEMPO_TOLERANCE_S = 0.6;
   function triggerFlash() {
     flashOverlay.classList.remove('on'); void flashOverlay.offsetWidth; flashOverlay.classList.add('on');
   }
@@ -388,18 +516,12 @@ function createEngine(opts) {
   let engine = null;
   let sensorsReady = false;
   let setActive = false;
-  let axisPicked = null;
-  let calibBuffer = { x: [], y: [], z: [] };
-  let calibDeadline = 0;
+  let calibrating = true;             // one stage now: hold still, measure the noise floor
+  let stillBuf = [], stillDeadline = 0;
   let lastRepsCount = 0;
-  let pauseAlreadyFlashed = false; // resets whenever we leave the paused state, so each new pause can flash once
-  let gravityEst = null; // slow-tracking gravity estimate per axis — computed ourselves, not trusted from the browser
-  const GRAVITY_ALPHA = 0.04; // gated to pauses only now, so can track a bit faster
-  // Peak-hold meters for the debug readout: jump instantly to a new peak,
-  // then decay — same idea as a VU meter — so the number is actually
-  // readable while lifting, instead of the raw per-frame value flickering.
-  let aPeakHold = 0, vPeakHold = 0;
-  const PEAK_HOLD_DECAY = 0.94; // per animation frame, ~0.5-1s to fall back to zero
+  let pauseAlreadyFlashed = false;    // resets on leaving a pause, so each new pause flashes once
+  let vPeakHold = 0;
+  const PEAK_HOLD_DECAY = 0.94;
   const trendCanvas = document.getElementById('trendCanvas');
   const trendCtx = trendCanvas.getContext('2d');
   function sizeCanvas() {
@@ -412,9 +534,9 @@ function createEngine(opts) {
   sizeCanvas();
   window.addEventListener('resize', drawTrendGraph);
 
-  // Every completed rep is a faded line; their point-for-point average (same rep, drawn
-  // bold) is the trend a client should be repeating each time — how tightly the faded
-  // lines hug it is the actual "how closely does this person move" signal.
+  // Every completed rep is a faded line; their point-for-point average (drawn bold) is the
+  // trend a client should be repeating each time — how tightly the faded lines hug it is the
+  // actual "how closely does this person move" signal.
   function drawTrendGraph() {
     sizeCanvas();
     const rect = trendCanvas.getBoundingClientRect();
@@ -431,7 +553,7 @@ function createEngine(opts) {
     if (reps.length === 0) return;
 
     const N = reps[0].trace.length;
-    let maxAbs = 0.1;
+    let maxAbs = 0.02;
     for (const r of reps) for (const v of r.trace) maxAbs = Math.max(maxAbs, Math.abs(v));
     maxAbs *= 1.15;
     const xAt = k => (k / (N - 1)) * w;
@@ -453,8 +575,8 @@ function createEngine(opts) {
 
     trendCtx.fillStyle = '#9fc3de';
     trendCtx.font = '9px monospace';
-    trendCtx.fillText('+' + maxAbs.toFixed(2) + ' m/s', 4, 10);
-    trendCtx.fillText('-' + maxAbs.toFixed(2) + ' m/s', 4, h - 4);
+    trendCtx.fillText('+' + maxAbs.toFixed(3) + ' m/s', 4, 10);
+    trendCtx.fillText('-' + maxAbs.toFixed(3) + ' m/s', 4, h - 4);
     trendCtx.fillText(reps.length + (reps.length === 1 ? ' rep' : ' reps'), w - 44, 10);
   }
 
@@ -471,16 +593,17 @@ function createEngine(opts) {
         <div class="rep-composite ${scoreClass(r.composite)}">${r.composite.toFixed(0)}</div>
       </div>
       <div class="sub-scores">
-        <div class="sub-score"><span class="k">rom</span><span class="v ${scoreClass(r.romScore)}">${r.romScore.toFixed(0)}</span></div>
         <div class="sub-score"><span class="k">tempo</span><span class="v ${scoreClass(r.tempoScore)}">${r.tempoScore.toFixed(0)}</span></div>
         <div class="sub-score"><span class="k">smooth</span><span class="v ${scoreClass(r.smoothScore)}">${r.smoothScore.toFixed(0)}</span></div>
         <div class="sub-score"><span class="k">control</span><span class="v ${scoreClass(r.controlScore)}">${r.controlScore.toFixed(0)}</span></div>
+        <div class="sub-score"><span class="k">rom</span><span class="v ${scoreClass(r.romScore)}">${r.romScore.toFixed(0)}</span></div>
+        <div class="phase-times">P1 ${r.phase1Duration.toFixed(1)}s · P2 ${r.phase2Duration.toFixed(1)}s</div>
       </div>`;
     repList.prepend(div);
   }
 
-  // Succinct pass/fail readout on pause length: the coaching takeaway a client should
-  // walk away with, not a full breakdown — either "shorten your pauses" or "you're good."
+  // Succinct pass/fail readout on pause length: the coaching takeaway a client should walk
+  // away with, not a full breakdown.
   function updateCoachLine() {
     const pauseDurations = engine.getPauseDurations();
     if (pauseDurations.length === 0) { coachLine.style.display = 'none'; return; }
@@ -498,10 +621,11 @@ function createEngine(opts) {
 
   function updateSummary() {
     const reps = engine.getReps();
+    const tempoEl = document.getElementById('summaryTempo');
+    const smoothEl = document.getElementById('summarySmooth');
     if (reps.length === 0) {
       summaryNum.textContent = '—'; summaryLbl.textContent = 'no reps yet';
-      document.getElementById('summarySmooth').textContent = '—';
-      document.getElementById('summaryControl').textContent = '—';
+      tempoEl.textContent = '—'; smoothEl.textContent = '—';
       coachLine.style.display = 'none';
       return;
     }
@@ -510,46 +634,73 @@ function createEngine(opts) {
     summaryNum.className = 'num ' + scoreClass(avg);
     summaryLbl.textContent = reps.length + (reps.length === 1 ? ' rep' : ' reps') + ' this set';
 
+    const avgTempo = reps.reduce((a,r)=>a+r.tempoScore,0) / reps.length;
     const avgSmooth = reps.reduce((a,r)=>a+r.smoothScore,0) / reps.length;
-    const avgControl = reps.reduce((a,r)=>a+r.controlScore,0) / reps.length;
-    const smoothEl = document.getElementById('summarySmooth');
-    const controlEl = document.getElementById('summaryControl');
+    tempoEl.textContent = avgTempo.toFixed(0);
+    tempoEl.className = 'v ' + scoreClass(avgTempo);
     smoothEl.textContent = avgSmooth.toFixed(0);
     smoothEl.className = 'v ' + scoreClass(avgSmooth);
-    controlEl.textContent = avgControl.toFixed(0);
-    controlEl.className = 'v ' + scoreClass(avgControl);
     updateCoachLine();
   }
 
   function tick() {
     if (!setActive || !engine) return;
-    const st = engine.getState();
-    livePhase.textContent = st;
-    livePhase.className = 'val ' + (st === 'moving' ? 'phase-moving' : st === 'paused' ? 'phase-paused' : 'phase-idle');
+    const now = performance.now();
+    const info = engine.getPhaseInfo(now);
+
+    phaseBig.textContent = calibrating ? 'HOLD STILL' : info.label;
+    phaseBig.className = 'phase-big ' + (calibrating ? 'phase-idle'
+      : info.kind === 'move' ? 'phase-moving'
+      : info.kind === 'pause' ? 'phase-paused' : 'phase-idle');
+
+    if (!calibrating && info.target > 0) {
+      const over = info.elapsed - info.target;
+      phaseTime.textContent = info.elapsed.toFixed(1) + 's / ' + info.target.toFixed(1) + 's'
+        + (over > TEMPO_TOLERANCE_S ? '  (+' + over.toFixed(1) + 's)' : '');
+      const frac = Math.min(1, info.elapsed / info.target);
+      tempoFill.style.width = (frac * 100) + '%';
+      tempoFill.className = 'tempo-fill'
+        + (over > TEMPO_TOLERANCE_S ? ' over' : (info.kind === 'pause' ? ' pause' : ''));
+    } else {
+      phaseTime.textContent = calibrating ? 'measuring sensor noise…' : '—';
+      tempoFill.style.width = '0%';
+      tempoFill.className = 'tempo-fill';
+    }
 
     const dbg = engine.getDebug();
-    document.getElementById('dbgA').textContent = dbg.aFilt.toFixed(3);
-    document.getElementById('dbgV').textContent = dbg.vFilt.toFixed(3);
-    document.getElementById('dbgAMag').textContent = dbg.aMagFilt.toFixed(3);
-    aPeakHold = Math.max(Math.abs(dbg.aFilt), aPeakHold * PEAK_HOLD_DECAY);
+    document.getElementById('dbgA').textContent = dbg.aFilt.toFixed(4);
+    document.getElementById('dbgV').textContent = dbg.vFilt.toFixed(4);
+    document.getElementById('dbgNoise').textContent = dbg.noiseSigma.toFixed(4)
+      + (dbg.noiseAdaptCount > 0 ? ' ·' + dbg.noiseAdaptCount : '');
+    document.getElementById('dbgThresh').textContent = dbg.thresh.toFixed(4);
     vPeakHold = Math.max(Math.abs(dbg.vFilt), vPeakHold * PEAK_HOLD_DECAY);
-    document.getElementById('dbgAPeak').textContent = 'peak ' + aPeakHold.toFixed(3);
-    document.getElementById('dbgVPeak').textContent = 'peak ' + vPeakHold.toFixed(3);
+    // Set max, not a decaying meter: the question this answers is "did this rig EVER produce
+    // enough signal", and a decaying peak reads near zero during the pause you check it in.
+    document.getElementById('dbgAPeak').textContent = 'set max ' + dbg.setMaxA.toFixed(4);
+    document.getElementById('dbgVPeak').textContent = 'peak ' + vPeakHold.toFixed(4);
     const dbgRestEl = document.getElementById('dbgRest');
     dbgRestEl.textContent = dbg.atRest ? 'yes' : 'no';
     dbgRestEl.className = 'val ' + (dbg.atRest ? 'phase-moving' : 'phase-idle');
 
-    if (st === 'paused') {
-      const elapsed = engine.getCurrentPauseElapsed(performance.now());
-      livePause.textContent = elapsed.toFixed(1) + 's';
-      livePause.className = 'val ' + (elapsed > PAUSE_FLASH_THRESHOLD_S ? 'phase-paused' : '');
-      if (elapsed > PAUSE_FLASH_THRESHOLD_S && !pauseAlreadyFlashed) {
+    // Say outright when the rig's motion is too weak to score, rather than silently
+    // reporting zero reps and leaving the coach to guess why.
+    if (!calibrating && dbg.setMaxA > 0.002 && dbg.setMaxA < dbg.thresh * 1.5) {
+      weakSignalNote.style.display = 'block';
+      weakSignalNote.textContent = 'Weak motion signal: peak ' + dbg.setMaxA.toFixed(4)
+        + ' m/s² vs threshold ' + dbg.thresh.toFixed(4)
+        + '. Reps may be missed — mount the phone more rigidly, or use a longer stroke / quicker tempo.';
+      signalText.textContent = 'signal weak';
+    } else if (!calibrating) {
+      weakSignalNote.style.display = 'none';
+      signalText.textContent = 'signal ok';
+    }
+
+    if (!calibrating && info.kind === 'pause') {
+      if (info.elapsed > PAUSE_FLASH_THRESHOLD_S && !pauseAlreadyFlashed) {
         pauseAlreadyFlashed = true;
         triggerFlash();
       }
     } else {
-      livePause.textContent = '—';
-      livePause.className = 'val';
       pauseAlreadyFlashed = false;
     }
     updateCoachLine();
@@ -558,6 +709,9 @@ function createEngine(opts) {
     liveRep.textContent = reps.length;
     if (reps.length > lastRepsCount) {
       for (let i = lastRepsCount; i < reps.length; i++) renderRep(reps[i], i + 1);
+      const last = reps[reps.length - 1];
+      lastP1El.textContent = last.phase1Duration.toFixed(1) + 's';
+      lastP2El.textContent = last.phase2Duration.toFixed(1) + 's';
       lastRepsCount = reps.length;
       updateSummary();
       drawTrendGraph();
@@ -570,40 +724,33 @@ function createEngine(opts) {
     const raw = e.accelerationIncludingGravity;
     if (!raw || raw.x === null) return;
     const t = performance.now();
+    const rx = raw.x || 0, ry = raw.y || 0, rz = raw.z || 0;
+    const aVert = Math.sqrt(rx*rx + ry*ry + rz*rz) - 9.81;
 
-    if (gravityEst === null) {
-      gravityEst = { x: raw.x || 0, y: raw.y || 0, z: raw.z || 0 };
-    } else if (!engine || engine.getState() !== 'moving') {
-      // Only re-anchor gravity while genuinely paused/idle — updating continuously would let
-      // real exercise motion gradually leak into and bias what should be a gravity-only baseline.
-      gravityEst.x += GRAVITY_ALPHA * ((raw.x || 0) - gravityEst.x);
-      gravityEst.y += GRAVITY_ALPHA * ((raw.y || 0) - gravityEst.y);
-      gravityEst.z += GRAVITY_ALPHA * ((raw.z || 0) - gravityEst.z);
-    }
-    const acc = {
-      x: (raw.x || 0) - gravityEst.x,
-      y: (raw.y || 0) - gravityEst.y,
-      z: (raw.z || 0) - gravityEst.z,
-    };
-
-    if (axisPicked === null) {
-      calibBuffer.x.push(acc.x);
-      calibBuffer.y.push(acc.y);
-      calibBuffer.z.push(acc.z);
-      if (t < calibDeadline) return;
-      const variance = (arr) => { const m = arr.reduce((a,b)=>a+b,0)/arr.length; return arr.reduce((a,b)=>a+(b-m)*(b-m),0)/arr.length; };
-      const vx = variance(calibBuffer.x), vy = variance(calibBuffer.y), vz = variance(calibBuffer.z);
-      axisPicked = vx >= vy && vx >= vz ? 'x' : (vy >= vz ? 'y' : 'z');
-      axisText.textContent = 'axis ' + axisPicked.toUpperCase();
+    // Calibration: hold still, measure this rig's real sensor noise, so the motion threshold
+    // is set from measurement rather than a guess that may be 5x too high for a slow rep.
+    if (calibrating) {
+      stillBuf.push(aVert);
+      if (t < stillDeadline) return;
+      // Median across sub-windows, so a plate dropped nearby during calibration cannot inflate
+      // the estimate for the whole set and leave the app deaf to every rep in it.
+      const CHUNKS = 5, per = Math.floor(stillBuf.length / CHUNKS);
+      const sigmas = [];
+      for (let c = 0; c < CHUNKS && per >= 8; c++) {
+        const s = noiseSigmaFromDiffs(stillBuf.slice(c * per, (c + 1) * per));
+        if (s !== null) sigmas.push(s);
+      }
+      let sigma;
+      if (sigmas.length) { sigmas.sort((a,b)=>a-b); sigma = sigmas[Math.floor(sigmas.length/2)]; }
+      else sigma = noiseSigmaFromDiffs(stillBuf) || 0;
+      engine.setNoiseFloor(sigma);
+      calibrating = false;
+      statusText.textContent = 'recording';
+      repList.innerHTML = '<div class="empty-note">Recording — reps will appear here.</div>';
       return;
     }
 
-    const aVal = acc[axisPicked] || 0;
-    // Total vector magnitude vs. gravity (~9.81 m/s²) — used only for "at rest" detection,
-    // since it stays accurate even as the phone's orientation shifts slightly during a rep.
-    const rawMag = Math.sqrt((raw.x || 0) ** 2 + (raw.y || 0) ** 2 + (raw.z || 0) ** 2);
-    const aMagVal = rawMag - 9.81;
-    engine.ingest(t, aVal, aMagVal);
+    engine.ingest(t, aVert);
   }
 
   permitBtn.addEventListener('click', function() {
@@ -648,21 +795,23 @@ function createEngine(opts) {
       pause1Target: parseFloat(document.getElementById('p1').value) || 2,
       phase2Target: parseFloat(document.getElementById('t2').value) || 4,
       pause2Target: parseFloat(document.getElementById('p2').value) || 2,
-      aThresh: parseFloat(document.getElementById('aThreshIn').value) || 0.5,
+      aThreshFloor: parseFloat(document.getElementById('aThreshIn').value) || 0.02,
       pauseHoldMs: parseFloat(document.getElementById('pauseHoldIn').value) || 300,
     });
-    axisPicked = null;
-    calibBuffer = { x: [], y: [], z: [] };
-    calibDeadline = performance.now() + 1500;
+    calibrating = true;
+    stillBuf = [];
+    stillDeadline = performance.now() + 1500;
     lastRepsCount = 0;
-    aPeakHold = 0; vPeakHold = 0;
+    vPeakHold = 0;
     pauseAlreadyFlashed = false;
-    gravityEst = null;
     setActive = true;
-    repList.innerHTML = '<div class="empty-note">Calibrating axis — move through one rep now…</div>';
+    repList.innerHTML = '<div class="empty-note">Hold still — measuring sensor noise…</div>';
     summaryNum.textContent = '—'; summaryLbl.textContent = 'no reps yet';
+    lastP1El.textContent = '—'; lastP2El.textContent = '—';
     coachLine.style.display = 'none';
-    statusText.textContent = 'recording';
+    weakSignalNote.style.display = 'none';
+    signalText.textContent = 'signal —';
+    statusText.textContent = 'hold still';
     startSetBtn.style.display = 'none';
     stopSetBtn.style.display = 'block';
     drawTrendGraph();
@@ -682,6 +831,8 @@ function createEngine(opts) {
       drawTrendGraph();
     }
     statusText.textContent = 'stopped';
+    phaseBig.textContent = 'STOPPED';
+    phaseBig.className = 'phase-big phase-idle';
     stopSetBtn.style.display = 'none';
     startSetBtn.style.display = 'block';
     if (repList.children.length === 0) repList.innerHTML = '<div class="empty-note">No reps detected this set.</div>';
@@ -690,15 +841,22 @@ function createEngine(opts) {
   resetBtn.addEventListener('click', function() {
     setActive = false;
     engine = null;
-    axisPicked = null;
-    axisText.textContent = 'axis —';
+    calibrating = true;
     lastRepsCount = 0;
     repList.innerHTML = '<div class="empty-note">Reps will appear here as you complete them.</div>';
     summaryNum.textContent = '—'; summaryLbl.textContent = 'no reps yet';
+    document.getElementById('summaryTempo').textContent = '—';
     document.getElementById('summarySmooth').textContent = '—';
-    document.getElementById('summaryControl').textContent = '—';
     coachLine.style.display = 'none';
-    livePause.textContent = '—'; livePause.className = 'val';
+    weakSignalNote.style.display = 'none';
+    signalText.textContent = 'signal —';
+    phaseBig.textContent = 'IDLE';
+    phaseBig.className = 'phase-big phase-idle';
+    phaseTime.textContent = '—';
+    tempoFill.style.width = '0%';
+    tempoFill.className = 'tempo-fill';
+    liveRep.textContent = '0';
+    lastP1El.textContent = '—'; lastP2El.textContent = '—';
     pauseAlreadyFlashed = false;
     stopSetBtn.style.display = 'none';
     startSetBtn.style.display = 'block';
