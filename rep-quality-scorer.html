@@ -158,7 +158,7 @@
       <div class="tempo-field"><label>Pause hold (ms)</label><input type="number" id="pauseHoldIn" value="300" step="25" min="150"></div>
     </div>
     <div class="live-row" style="margin-top:10px;">
-      <div class="live-box"><div class="lbl">noise σ</div><div class="val" id="dbgNoise" style="font-size:13px">—</div></div>
+      <div class="live-box"><div class="lbl">noise σ</div><div class="val" id="dbgNoise" style="font-size:13px">—</div><div style="font-size:10px;color:var(--dim);margin-top:2px;" id="dbgGRef">g —</div></div>
       <div class="live-box"><div class="lbl">eff. thresh</div><div class="val" id="dbgThresh" style="font-size:13px">—</div></div>
       <div class="live-box"><div class="lbl">At Rest</div><div class="val" id="dbgRest" style="font-size:13px">—</div></div>
     </div>
@@ -218,7 +218,7 @@ function createEngine(opts) {
     aThreshFloor: 0.02,   // absolute minimum "quiet" threshold, from the UI
     noiseK: 3,            // effective threshold = max(floor, noiseK × measured still-noise σ)
     pauseHoldMs: 300, graceMs: 500, startDebounceMs: 60,
-    minPhaseMs: 800, lpAlpha: 0.25, lpAlphaFast: 0.6,
+    minPhaseMs: 800, lpAlpha: 0.25, lpAlphaFast: 0.35,
     phase1Target: 4, pause1Target: 2, phase2Target: 4, pause2Target: 2,
     tempoTolerance: 0.6
   }, opts || {});
@@ -230,6 +230,12 @@ function createEngine(opts) {
     0.75 * Math.max(cfg.phase1Target, cfg.phase2Target) * 1000);
 
   let state = 'idle';
+  // The phone's OWN resting reading, measured — not the textbook 9.81. Consumer accelerometers
+  // routinely carry a percent or two of scale/bias error, and a phone that rests at 10.03 would
+  // otherwise show a permanent +0.22 m/s² of phantom acceleration: enough to sit above the
+  // motion threshold forever, so the app never sees stillness, never closes a rep, and quietly
+  // integrates that bias into a runaway velocity.
+  let gRef = 9.81;
   let aFilt = 0, v = 0, vFilt = 0, lastT = null, lastA = 0;
   // Two filters on purpose. aFilt (heavy) feeds velocity and the smoothness scores, where
   // noise rejection matters. aFast (light) decides moving-vs-still, where LAG is what hurts:
@@ -239,7 +245,8 @@ function createEngine(opts) {
   let noiseSigma = 0;
   let belowSince = null, belowASince = null, aboveSince = null;
   let phaseStartT = null, movingSinceT = null, phaseSamples = [];
-  let phasePeakAbsV = 0, phaseDirSign = 0;
+  let phasePeakAbsV = 0, phaseDirSign = 0, phasePeakAFast = 0;
+  let avgDtMs = 40;   // running estimate of the real sample interval, for the lag correction
   let reps = [], romHistory = [], maxAbsA = 0.001;
   let pauseStartT = null, pauseDurations = [];
   // In-set noise re-estimation. The pre-set "hold still" reading is taken before the machine
@@ -253,7 +260,27 @@ function createEngine(opts) {
   // one phase is ever missed; direction re-syncs itself on the very next phase.
   let p1Dir = null, pendingP1 = null;
 
-  function effThresh() { return Math.max(cfg.aThreshFloor, cfg.noiseK * noiseSigma); }
+  // noiseSigma is measured on the RAW signal, but the threshold is tested against aFast, which
+  // the low-pass has already quietened by sqrt(a/(2-a)). Comparing the raw figure to a filtered
+  // signal silently inflates the guard to ~4.6 sigma and, on a rig with any real vibration,
+  // pushes the threshold above the reps themselves. Scale it so 3 sigma means 3 sigma.
+  const FAST_NOISE_FACTOR = Math.sqrt(cfg.lpAlphaFast / (2 - cfg.lpAlphaFast));
+  function effThresh() {
+    return Math.max(cfg.aThreshFloor, cfg.noiseK * noiseSigma * FAST_NOISE_FACTOR);
+  }
+
+  // A phase's two threshold crossings are not symmetric, so the low-pass stretches every
+  // reported phase by a fixed amount. At the start, acceleration jumps to peak and the filtered
+  // signal races through the threshold in well under a sample; at the end it decays from peak
+  // toward zero and takes several. Both delays follow the same exponential, so given this
+  // phase's own peak they can be computed and removed rather than lived with.
+  const DECAY_K = -Math.log(1 - cfg.lpAlphaFast);
+  function lagCorrectionMs(peakA, thr) {
+    if (!(peakA > thr) || !(thr > 0)) return 0;
+    const nEnd = Math.log(peakA / thr) / DECAY_K;          // decay from peak down to threshold
+    const nStart = -Math.log(1 - thr / peakA) / DECAY_K;   // rise from zero up to threshold
+    return Math.max(0, (nEnd - nStart) * avgDtMs);
+  }
 
   function finishPhase(tNow) {
     if (phaseSamples.length < 2) { phaseSamples = []; return null; }
@@ -386,6 +413,12 @@ function createEngine(opts) {
   function adaptNoise() {
     if (pauseNoiseBuf.length < 30) return;
     const sigma = noiseSigmaFromDiffs(pauseNoiseBuf);
+    // Re-trim the gravity reference to what the phone actually reads when it is not moving.
+    // Sensor bias drifts (notably with temperature), and an untrimmed reference reappears as
+    // phantom acceleration. Averaged over a window a real rep nets to ~zero anyway, so the
+    // occasional window that is motion rather than rest barely moves this.
+    const meanMag = pauseNoiseBuf.reduce((a,b)=>a+b,0) / pauseNoiseBuf.length;
+    if (meanMag > 5 && meanMag < 15) gRef = 0.85 * gRef + 0.15 * meanMag;
     pauseNoiseBuf = [];
     if (sigma === null) return;
     if (noiseSigma > 0 && sigma > noiseSigma * 4) return;   // a bump or knock, not the floor
@@ -397,7 +430,10 @@ function createEngine(opts) {
     noiseAdaptCount++;
   }
 
-  function ingest(t, aVert) {
+  // Takes the raw acceleration MAGNITUDE; the gravity reference is subtracted in here so the
+  // engine owns it and can keep it trimmed as the sensor's bias drifts.
+  function ingest(t, rawMag) {
+    const aVert = rawMag - gRef;
     if (lastT === null) { lastT = t; lastA = aVert; aFilt = aVert; aFast = aVert; return; }
     const dt = (t - lastT) / 1000;
     if (dt <= 0) return;
@@ -407,15 +443,24 @@ function createEngine(opts) {
     v = v + (lastA + aFilt) / 2 * dt;
     vFilt = vFilt + cfg.lpAlpha * (v - vFilt);
 
-    if (state === 'moving' && Math.abs(vFilt) > phasePeakAbsV) {
-      phasePeakAbsV = Math.abs(vFilt);
-      phaseDirSign = vFilt >= 0 ? 1 : -1;
+    avgDtMs = 0.9 * avgDtMs + 0.1 * (dt * 1000);
+    if (state === 'moving') {
+      phasePeakAbsV = Math.max(phasePeakAbsV, Math.abs(vFilt));
+      phasePeakAFast = Math.max(phasePeakAFast, Math.abs(aFast));
     }
 
+    // Hysteresis (Schmitt trigger): starting a phase demands the full threshold, but ending one
+    // only requires falling to half of it. A single threshold makes marginal reps flip-flop —
+    // the signal straddles the line, phases start and abort, and nothing ever completes. The
+    // gap between the two bars is a dead zone that holds whatever state we are already in.
     const thr = effThresh();
-    const aQuiet = Math.abs(aFast) < thr;
-    if (aQuiet) { if (belowASince === null) belowASince = t; aboveSince = null; }
-    else { belowASince = null; if (aboveSince === null) aboveSince = t; }
+    const thrLow = thr * 0.5;
+    const mag = Math.abs(aFast);
+    const aQuiet = mag < thrLow;
+    if (aQuiet) { if (belowASince === null) belowASince = t; }
+    else if (mag > thr) { belowASince = null; }
+    if (mag > thr) { if (aboveSince === null) aboveSince = t; }
+    else if (aQuiet) { aboveSince = null; }
     const quietFor = belowASince === null ? 0 : (t - belowASince);
 
     // Velocity must ALSO be low to call a pause. Quiet acceleration alone is not enough: it
@@ -443,17 +488,24 @@ function createEngine(opts) {
     if (fire && state === 'moving') {
       // belowASince, not belowSince: it is the first sample of this quiet run, so it dates the
       // stop itself rather than the later moment the velocity check also came good.
-      confirmPause(t, belowASince !== null ? belowASince : t);
+      const rawEnd = belowASince !== null ? belowASince : t;
+      confirmPause(t, rawEnd - lagCorrectionMs(phasePeakAFast, thr));
     } else if (state !== 'moving' && aboveSince !== null && (t - aboveSince) >= cfg.startDebounceMs) {
       // Debounced against a single noise spike, but the phase is dated from aboveSince — the
       // real first movement — so the debounce costs robustness nothing in timing accuracy.
       pauseNoiseBuf = [];   // discard the partial window that runs into this movement
       if (pauseStartT !== null) { pauseDurations.push((aboveSince - pauseStartT) / 1000); pauseStartT = null; }
+      // Direction from the sign of acceleration at the moment travel begins, NOT from velocity.
+      // A stack heading up must accelerate up first (reading above g); heading down, below g.
+      // That sign is available immediately and cannot drift, whereas velocity is an integral
+      // and its sign can be swamped by accumulated bias — which silently breaks rep pairing,
+      // since two phases read as the same direction never close a rep.
       state = 'moving'; phaseStartT = aboveSince; movingSinceT = aboveSince; phaseSamples = [];
-      phasePeakAbsV = 0; phaseDirSign = 0;
+      phasePeakAbsV = 0; phasePeakAFast = 0;
+      phaseDirSign = aFast >= 0 ? 1 : -1;
     }
     if (state === 'moving') { phaseSamples.push({ t, v: vFilt, a: aFilt }); pauseNoiseBuf = []; }
-    else if (aQuiet) { pauseNoiseBuf.push(aVert); adaptNoise(); }
+    else if (aQuiet) { pauseNoiseBuf.push(rawMag); adaptNoise(); }
     lastT = t; lastA = aFilt;
   }
 
@@ -479,9 +531,10 @@ function createEngine(opts) {
   return { ingest, getReps: () => reps, getState: () => state, getPhaseInfo,
     dropLastRep: () => { reps.pop(); },
     setNoiseFloor: (s) => { noiseSigma = s; },
+    setGravityRef: (g) => { if (g > 5 && g < 15) gRef = g; },
     getPauseDurations: () => pauseDurations,
     getDebug: () => ({ aFilt, vFilt, noiseSigma, thresh: effThresh(), setMaxA: maxAbsA,
-      noiseAdaptCount, atRest: Math.abs(aFast) < effThresh() }) };
+      noiseAdaptCount, gRef, atRest: Math.abs(aFast) < effThresh() }) };
 }
 
 // ---------- UI wiring ----------
@@ -672,6 +725,7 @@ function createEngine(opts) {
     document.getElementById('dbgV').textContent = dbg.vFilt.toFixed(4);
     document.getElementById('dbgNoise').textContent = dbg.noiseSigma.toFixed(4)
       + (dbg.noiseAdaptCount > 0 ? ' ·' + dbg.noiseAdaptCount : '');
+    document.getElementById('dbgGRef').textContent = 'g ' + dbg.gRef.toFixed(3);
     document.getElementById('dbgThresh').textContent = dbg.thresh.toFixed(4);
     vPeakHold = Math.max(Math.abs(dbg.vFilt), vPeakHold * PEAK_HOLD_DECAY);
     // Set max, not a decaying meter: the question this answers is "did this rig EVER produce
@@ -725,13 +779,16 @@ function createEngine(opts) {
     if (!raw || raw.x === null) return;
     const t = performance.now();
     const rx = raw.x || 0, ry = raw.y || 0, rz = raw.z || 0;
-    const aVert = Math.sqrt(rx*rx + ry*ry + rz*rz) - 9.81;
+    const rawMag = Math.sqrt(rx*rx + ry*ry + rz*rz);
 
     // Calibration: hold still, measure this rig's real sensor noise, so the motion threshold
     // is set from measurement rather than a guess that may be 5x too high for a slow rep.
     if (calibrating) {
-      stillBuf.push(aVert);
+      stillBuf.push(rawMag);
       if (t < stillDeadline) return;
+      // What this phone reads while stationary IS its gravity reference. Assuming 9.81 leaves
+      // any sensor scale error as permanent phantom acceleration.
+      engine.setGravityRef(stillBuf.reduce((a,b)=>a+b,0) / stillBuf.length);
       // Median across sub-windows, so a plate dropped nearby during calibration cannot inflate
       // the estimate for the whole set and leave the app deaf to every rep in it.
       const CHUNKS = 5, per = Math.floor(stillBuf.length / CHUNKS);
@@ -750,7 +807,7 @@ function createEngine(opts) {
       return;
     }
 
-    engine.ingest(t, aVert);
+    engine.ingest(t, rawMag);
   }
 
   permitBtn.addEventListener('click', function() {
