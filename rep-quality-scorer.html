@@ -82,8 +82,11 @@
   .sub-score { display:flex; justify-content:space-between; font-size:11px; }
   .sub-score .k { color:var(--dim); font-family:var(--mono); }
   .sub-score .v { font-family:var(--mono); font-weight:600; }
-  .phase-times { grid-column:span 2; font-family:var(--mono); font-size:10px; color:var(--dim);
-    border-top:1px solid var(--line); margin-top:4px; padding-top:6px; text-align:center; }
+  .phase-times { display:grid; grid-template-columns:repeat(4,1fr); gap:6px; margin:4px 0 10px; }
+  .pt { background:rgba(255,255,255,.04); border-radius:6px; padding:6px 2px; text-align:center; }
+  .ptk { display:block; font-family:var(--mono); font-size:8px; letter-spacing:.06em;
+    text-transform:uppercase; color:var(--dim); }
+  .ptv { display:block; font-family:var(--mono); font-size:14px; font-weight:700; margin-top:2px; }
 
   .score-good { color:var(--accent); }
   .score-mid { color:var(--warn); }
@@ -247,7 +250,7 @@ function createEngine(opts) {
   let phaseStartT = null, movingSinceT = null, phaseSamples = [];
   let phasePeakAbsV = 0, phaseDirSign = 0, phasePeakAFast = 0;
   let avgDtMs = 40;   // running estimate of the real sample interval, for the lag correction
-  let reps = [], romHistory = [], maxAbsA = 0.001;
+  let reps = [], maxAbsA = 0.001;
   let pauseStartT = null, pauseDurations = [];
   // In-set noise re-estimation. The pre-set "hold still" reading is taken before the machine
   // is loaded and moving; a stack that is silent at rest can still rattle once it is running,
@@ -259,6 +262,10 @@ function createEngine(opts) {
   // and anything travelling the other way is phase 2. Pure counting loses sync permanently if
   // one phase is ever missed; direction re-syncs itself on the very next phase.
   let p1Dir = null, pendingP1 = null;
+  // A tempo prescription has four numbers (4-2-4-2), so a rep has to carry four durations.
+  // Pause 1 is known when phase 2 begins, but pause 2 only ends when the NEXT rep starts —
+  // so it is filled in retrospectively, and repsRevision tells the UI to repaint when it lands.
+  let currentPause1 = null, repAwaitingPause2 = null, repsRevision = 0;
 
   // noiseSigma is measured on the RAW signal, but the threshold is tested against aFast, which
   // the low-pass has already quietened by sqrt(a/(2-a)). Comparing the raw figure to a filtered
@@ -345,16 +352,6 @@ function createEngine(opts) {
   }
 
   function packageRep(p1, p2) {
-    const romAvg = (p1.rom + p2.rom) / 2;
-    let romScore;
-    if (romHistory.length === 0) romScore = 100;
-    else {
-      const baseline = romHistory.reduce((a,b)=>a+b,0) / romHistory.length;
-      const tolerance = Math.max(0.001, baseline * 0.15);
-      romScore = scoreFromError(romAvg, baseline, tolerance);
-    }
-    romHistory.push(romAvg);
-
     const tempoScore = (
       scoreFromError(p1.duration, cfg.phase1Target, cfg.tempoTolerance) +
       scoreFromError(p2.duration, cfg.phase2Target, cfg.tempoTolerance)
@@ -372,14 +369,15 @@ function createEngine(opts) {
     };
     const controlScore = (controlScoreOf(p1) + controlScoreOf(p2)) / 2;
 
-    // Weighted toward what this rig can actually measure well. Phase timing is solid; ROM
-    // from double-integrated acceleration is the least trustworthy number here, so it only
-    // nudges the score rather than driving it.
-    const composite = romScore*0.10 + tempoScore*0.45 + smoothScore*0.25 + controlScore*0.20;
+    // Timing is what this hardware measures well and what is being coached, so it leads.
+    // Range of motion is deliberately absent: derived from double-integrated acceleration it
+    // is noise-dominated at these stroke lengths, and reporting it would dress up a guess as
+    // a measurement.
+    const composite = tempoScore*0.50 + smoothScore*0.25 + controlScore*0.25;
     const built = buildTrace(p1, p2);
-    return { romScore, tempoScore, smoothScore, controlScore, composite,
+    return { tempoScore, smoothScore, controlScore, composite,
       phase1Duration: p1.duration, phase2Duration: p2.duration,
-      phase1PeakV: p1.peakAbsV, phase2PeakV: p2.peakAbsV,
+      pause1Duration: null, pause2Duration: null,
       trace: built ? built.trace : null, phase1Frac: built ? built.phase1Frac : null };
   }
 
@@ -395,8 +393,14 @@ function createEngine(opts) {
       if (phase.dir === p1Dir) {
         pendingP1 = phase;                 // opens a rep
       } else if (pendingP1) {
-        reps.push(packageRep(pendingP1, phase));
+        const rep = packageRep(pendingP1, phase);
+        rep.pause1Duration = currentPause1;
+        rep.pause2Duration = null;         // not knowable until the next rep begins
+        reps.push(rep);
+        repAwaitingPause2 = rep;
+        repsRevision++;
         pendingP1 = null;                  // closes it
+        currentPause1 = null;
       }
     }
     state = 'paused';
@@ -494,7 +498,19 @@ function createEngine(opts) {
       // Debounced against a single noise spike, but the phase is dated from aboveSince — the
       // real first movement — so the debounce costs robustness nothing in timing accuracy.
       pauseNoiseBuf = [];   // discard the partial window that runs into this movement
-      if (pauseStartT !== null) { pauseDurations.push((aboveSince - pauseStartT) / 1000); pauseStartT = null; }
+      if (pauseStartT !== null) {
+        const dur = (aboveSince - pauseStartT) / 1000;
+        pauseDurations.push(dur);
+        // Which pause just ended is told by where we are in the rep: mid-rep (a phase 1 is
+        // open) means this was pause 1; otherwise it closed off the previous rep.
+        if (pendingP1 !== null) currentPause1 = dur;
+        else if (repAwaitingPause2) {
+          repAwaitingPause2.pause2Duration = dur;
+          repAwaitingPause2 = null;
+          repsRevision++;
+        }
+        pauseStartT = null;
+      }
       // Direction from the sign of acceleration at the moment travel begins, NOT from velocity.
       // A stack heading up must accelerate up first (reading above g); heading down, below g.
       // That sign is available immediately and cannot drift, whereas velocity is an integral
@@ -529,7 +545,8 @@ function createEngine(opts) {
   }
 
   return { ingest, getReps: () => reps, getState: () => state, getPhaseInfo,
-    dropLastRep: () => { reps.pop(); },
+    getRepsRevision: () => repsRevision,
+    dropLastRep: () => { reps.pop(); repAwaitingPause2 = null; repsRevision++; },
     setNoiseFloor: (s) => { noiseSigma = s; },
     setGravityRef: (g) => { if (g > 5 && g < 15) gRef = g; },
     getPauseDurations: () => pauseDurations,
@@ -571,7 +588,7 @@ function createEngine(opts) {
   let setActive = false;
   let calibrating = true;             // one stage now: hold still, measure the noise floor
   let stillBuf = [], stillDeadline = 0;
-  let lastRepsCount = 0;
+  let lastRepsRevision = -1;
   let pauseAlreadyFlashed = false;    // resets on leaving a pause, so each new pause flashes once
   let vPeakHold = 0;
   const PEAK_HOLD_DECAY = 0.94;
@@ -637,20 +654,42 @@ function createEngine(opts) {
 
   function scoreClass(v) { return v >= 80 ? 'score-good' : (v >= 55 ? 'score-mid' : 'score-bad'); }
 
+  // Same error-to-score curve the engine uses, so a duration's colour on the card agrees with
+  // the tempo score it feeds.
+  function scoreFromErrorUI(actual, target) {
+    return Math.max(0, 100 - (Math.abs(actual - target) / TEMPO_TOLERANCE_S) * 100);
+  }
+
+  // The four durations ARE the deliverable, so they lead the card and are sized to be read,
+  // with each one coloured against its own target. Pause 2 shows a dash until the next rep
+  // starts, because that is the moment it becomes knowable.
+  function fmtPhase(label, val, target) {
+    if (val === null || val === undefined) return `<div class="pt"><span class="ptk">${label}</span><span class="ptv">—</span></div>`;
+    const cls = target > 0 ? scoreClass(scoreFromErrorUI(val, target)) : '';
+    return `<div class="pt"><span class="ptk">${label}</span><span class="ptv ${cls}">${val.toFixed(1)}s</span></div>`;
+  }
+
   function renderRep(r, idx) {
     const div = document.createElement('div');
     div.className = 'rep-card';
+    const t1 = parseFloat(document.getElementById('t1').value) || 4;
+    const q1 = parseFloat(document.getElementById('p1').value) || 2;
+    const t2 = parseFloat(document.getElementById('t2').value) || 4;
+    const q2 = parseFloat(document.getElementById('p2').value) || 2;
     div.innerHTML = `
       <div class="rep-card-top">
         <div class="rep-num">REP ${idx}</div>
         <div class="rep-composite ${scoreClass(r.composite)}">${r.composite.toFixed(0)}</div>
       </div>
+      <div class="phase-times">
+        ${fmtPhase('P1', r.phase1Duration, t1)}
+        ${fmtPhase('pause', r.pause1Duration, q1)}
+        ${fmtPhase('P2', r.phase2Duration, t2)}
+        ${fmtPhase('pause', r.pause2Duration, q2)}
+      </div>
       <div class="sub-scores">
         <div class="sub-score"><span class="k">tempo</span><span class="v ${scoreClass(r.tempoScore)}">${r.tempoScore.toFixed(0)}</span></div>
         <div class="sub-score"><span class="k">smooth</span><span class="v ${scoreClass(r.smoothScore)}">${r.smoothScore.toFixed(0)}</span></div>
-        <div class="sub-score"><span class="k">control</span><span class="v ${scoreClass(r.controlScore)}">${r.controlScore.toFixed(0)}</span></div>
-        <div class="sub-score"><span class="k">rom</span><span class="v ${scoreClass(r.romScore)}">${r.romScore.toFixed(0)}</span></div>
-        <div class="phase-times">P1 ${r.phase1Duration.toFixed(1)}s · P2 ${r.phase2Duration.toFixed(1)}s</div>
       </div>`;
     repList.prepend(div);
   }
@@ -761,15 +800,21 @@ function createEngine(opts) {
 
     const reps = engine.getReps();
     liveRep.textContent = reps.length;
-    if (reps.length > lastRepsCount) {
-      for (let i = lastRepsCount; i < reps.length; i++) renderRep(reps[i], i + 1);
+    // Repaint on any rep change, not just a new one: pause 2 is filled in retrospectively when
+    // the following rep starts, and that card has to stop showing a dash.
+    const rev = engine.getRepsRevision();
+    if (rev !== lastRepsRevision) {
+      lastRepsRevision = rev;
+      repList.innerHTML = '';
+      reps.forEach((r, i) => renderRep(r, i + 1));
+      if (reps.length === 0) repList.innerHTML = '<div class="empty-note">Recording — reps will appear here.</div>';
       const last = reps[reps.length - 1];
-      lastP1El.textContent = last.phase1Duration.toFixed(1) + 's';
-      lastP2El.textContent = last.phase2Duration.toFixed(1) + 's';
-      lastRepsCount = reps.length;
+      if (last) {
+        lastP1El.textContent = last.phase1Duration.toFixed(1) + 's';
+        lastP2El.textContent = last.phase2Duration.toFixed(1) + 's';
+      }
       updateSummary();
       drawTrendGraph();
-      if (repList.querySelector('.empty-note')) repList.querySelector('.empty-note').remove();
     }
     requestAnimationFrame(tick);
   }
@@ -858,7 +903,7 @@ function createEngine(opts) {
     calibrating = true;
     stillBuf = [];
     stillDeadline = performance.now() + 1500;
-    lastRepsCount = 0;
+    lastRepsRevision = -1;
     vPeakHold = 0;
     pauseAlreadyFlashed = false;
     setActive = true;
@@ -899,7 +944,7 @@ function createEngine(opts) {
     setActive = false;
     engine = null;
     calibrating = true;
-    lastRepsCount = 0;
+    lastRepsRevision = -1;
     repList.innerHTML = '<div class="empty-note">Reps will appear here as you complete them.</div>';
     summaryNum.textContent = '—'; summaryLbl.textContent = 'no reps yet';
     document.getElementById('summaryTempo').textContent = '—';
