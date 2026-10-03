@@ -187,7 +187,8 @@
   <div class="panel">
     <div class="panel-title">Reps</div>
     <div id="repList"><div class="empty-note">Press Stop when the set is done — reps and phase times appear here.</div></div>
-    <button class="btn btn-ghost" id="copyBtn" style="margin-top:10px; margin-bottom:0; display:none;">Copy results</button>
+    <button class="btn btn-ghost" id="copyBtn" style="margin-top:10px; margin-bottom:8px; display:none;">Copy results</button>
+    <button class="btn btn-ghost" id="rawBtn" style="margin-bottom:0; display:none; font-size:13px;">Download raw signal (.csv)</button>
   </div>
 
   <footer>Runs entirely on-device · mount the phone rigidly to the stack carrier<br>Reads travel along gravity — built for vertical stacks, not horizontal-only machines</footer>
@@ -370,8 +371,11 @@ function scoreSet(seg, tgt) {
       scoreFromError(r.phase1Duration, tgt.p1, TOL),
       scoreFromError(r.phase2Duration, tgt.p2, TOL)
     ];
-    if (r.pause1Duration !== null) parts.push(scoreFromError(r.pause1Duration, tgt.q1, TOL));
-    if (r.pause2Duration !== null) parts.push(scoreFromError(r.pause2Duration, tgt.q2, TOL));
+    // A pause below the resolution floor is excluded rather than scored as if it were a real
+    // 0.2s hold — scoring an unmeasurable quantity is worse than leaving it out.
+    const minP = tgt.minPause;
+    if (r.pause1Duration !== null && r.pause1Duration >= minP) parts.push(scoreFromError(r.pause1Duration, tgt.q1, TOL));
+    if (r.pause2Duration !== null && r.pause2Duration >= minP) parts.push(scoreFromError(r.pause2Duration, tgt.q2, TOL));
     // The score is tempo and nothing else. A smoothness term lived here, built from the jerk
     // across each phase, and it was dropped: the sensor's own noise floor swamped it, so a
     // mathematically perfect rep and a deliberately juddering one scored within a few points
@@ -458,7 +462,7 @@ function coachingFor(reps, tgt) {
     return {
       p1: parseFloat($('t1').value) || 4, q1: parseFloat($('p1').value) || 2,
       p2: parseFloat($('t2').value) || 4, q2: parseFloat($('p2').value) || 2,
-      tol: 0.6
+      tol: 0.6, minPause: parseFloat($('minPauseIn').value) || 0.6
     };
   }
   function segOpts(tgt) {
@@ -518,8 +522,12 @@ function coachingFor(reps, tgt) {
     trendCtx.fillText(res.reps.length + (res.reps.length === 1 ? ' rep' : ' reps'), w - 44, 10);
   }
 
-  function cell(label, val, target, tol) {
+  function cell(label, val, target, tol, unresolved) {
     if (val === null || val === undefined) return '<div class="pt"><span class="ptk">' + label + '</span><span class="ptv">—</span></div>';
+    // Shown in full, but marked: the stroke boundaries either side of a pause this short are
+    // not separable, so the figure is an artefact of where the threshold happened to fall.
+    if (unresolved) return '<div class="pt" style="opacity:.55"><span class="ptk">' + label
+      + '</span><span class="ptv" style="font-size:11px">&lt;' + tol.toFixed(1) + 's<br>unresolved</span></div>';
     const cls = scoreClass(scoreFromError(val, target, tol));
     return '<div class="pt"><span class="ptk">' + label + '</span><span class="ptv ' + cls + '">' + val.toFixed(1) + 's</span></div>';
   }
@@ -527,6 +535,7 @@ function coachingFor(reps, tgt) {
   function render(res) {
     lastResult = res;
     $('copyBtn').style.display = 'block';
+    $('rawBtn').style.display = 'block';
     const tgt = res.targets;
     repList.innerHTML = '';
     if (!res.reps.length) {
@@ -540,9 +549,9 @@ function coachingFor(reps, tgt) {
           '<div class="rep-composite ' + scoreClass(r.composite) + '">' + r.composite.toFixed(0) + '</div></div>' +
           '<div class="phase-times">' +
             cell('P1', r.phase1Duration, tgt.p1, tgt.tol) +
-            cell('pause', r.pause1Duration, tgt.q1, tgt.tol) +
+            cell('pause', r.pause1Duration, tgt.q1, tgt.minPause, r.pause1Unresolved) +
             cell('P2', r.phase2Duration, tgt.p2, tgt.tol) +
-            cell('pause', r.pause2Duration, tgt.q2, tgt.tol) +
+            cell('pause', r.pause2Duration, tgt.q2, tgt.minPause, r.pause2Unresolved) +
           '</div>';
         repList.appendChild(d);
       });
@@ -594,13 +603,14 @@ function coachingFor(reps, tgt) {
 
     // Say plainly when the rig simply did not produce enough signal, rather than
     // reporting nothing and leaving the coach to guess why.
-    if (res.dropped && !res.merged) {
+    if (res.unresolved && !res.merged) {
       weakSignalNote.style.display = 'block';
       weakSignalNote.className = 'warn-note';
-      weakSignalNote.textContent = res.dropped + (res.dropped === 1 ? ' rep was' : ' reps were')
-        + ' left out: the turnaround was held for less than ' + res.minPause.toFixed(1)
-        + 's, which is too short to tell the end of one stroke from the start of the next. '
-        + 'Hold each turnaround a little longer and they will be measured.';
+      weakSignalNote.textContent = res.unresolved + (res.unresolved === 1 ? ' turnaround was' : ' turnarounds were')
+        + ' held for less than ' + res.minPause.toFixed(1) + 's, too short to tell the end of one '
+        + 'stroke from the start of the next. Those pauses are marked unresolved and left out of '
+        + 'the score — the phase times either side of them still stand. Hold each turnaround a '
+        + 'little longer and the pauses will be measured too.';
     } else if (res.merged) {
       weakSignalNote.style.display = 'block';
       weakSignalNote.className = 'warn-note';
@@ -643,16 +653,22 @@ function coachingFor(reps, tgt) {
     // a 30-second rep or no reps at all and leaving the coach to wonder which.
     const runLimit = 3 * Math.max(tgt.p1, tgt.p2) + 2;
     const merged = seg.phases.filter(p => p.dur > runLimit).length;
-    // Held to the stated floor, not half of it. This admitted pauses of 0.3s against a 0.6s
-    // setting, and a field trial duly produced a "rep" with a 0.3s pause and a 0.2s phase —
-    // scored 0 and shown with the same confidence as a real one. Below the floor the stroke
-    // boundaries are not resolvable, so the rep is not a bad rep, it is not a measurement.
+    // A pause under the floor is not a measurement, but the strokes either side of it usually
+    // still are. Discarding the whole rep for it turned a freehand trial that had correctly
+    // found four reps into "0 reps detected", which told the coach less than the bad number
+    // it replaced. So the unresolvable pause is marked unresolved and kept out of the score,
+    // and the phase times it sits between are still reported.
     const all = scoreSet(seg, tgt);
-    const scored = all.filter(r =>
-      (r.pause1Duration === null || r.pause1Duration >= minPause) &&
-      r.p1.dur <= runLimit && r.p2.dur <= runLimit);
+    const scored = all.filter(r => r.p1.dur <= runLimit && r.p2.dur <= runLimit);
+    let unresolved = 0;
+    scored.forEach(r => {
+      r.pause1Unresolved = r.pause1Duration !== null && r.pause1Duration < minPause;
+      r.pause2Unresolved = r.pause2Duration !== null && r.pause2Duration < minPause;
+      if (r.pause1Unresolved) unresolved++;
+      if (r.pause2Unresolved) unresolved++;
+    });
     render({ seg, reps: scored, targets: tgt, merged: merged, runLimit: runLimit,
-             minPause: minPause, dropped: all.length - scored.length });
+             minPause: minPause, dropped: all.length - scored.length, unresolved: unresolved });
   }
 
   function tick() {
@@ -742,6 +758,7 @@ function coachingFor(reps, tgt) {
     $('dbgThresh').textContent = '—'; $('dbgAPeak').textContent = '—';
     coachLine.style.display = 'none'; weakSignalNote.style.display = 'none';
     longPauseNote.style.display = 'none'; $('copyBtn').style.display = 'none';
+    $('rawBtn').style.display = 'none';
     signalText.textContent = 'signal —';
     stopSetBtn.style.display = 'none'; startSetBtn.style.display = 'block';
     startSetBtn.disabled = !sensorsReady;
@@ -757,6 +774,10 @@ function coachingFor(reps, tgt) {
     const res = lastResult;
     if (!res) return;
     const t = res.targets, s = res.seg;
+    // The sample rate pins down how long the set really was, which decides whether short
+    // phase times mean a fast lift or a mis-read — iOS varies this between 30 and 60 Hz.
+    const elapsed = samples.length > 1 ? (samples[samples.length - 1].t - samples[0].t) / 1000 : 0;
+    const rate = elapsed > 0 ? samples.length / elapsed : 0;
     const lines = [
       'Rep Quality Scorer — set results',
       'target tempo: ' + t.p1 + ' / ' + t.q1 + ' / ' + t.p2 + ' / ' + t.q2 + ' s',
@@ -765,16 +786,31 @@ function coachingFor(reps, tgt) {
       'threshold   : ' + s.thr.toFixed(4),
       'peak accel  : ' + s.peak.toFixed(4) + '  (' + (s.thr > 0 ? (s.peak / s.thr).toFixed(1) : '?')
         + 'x threshold — needs 3x to be trustworthy)',
-      'samples     : ' + samples.length,
-      'reps shown  : ' + res.reps.length + (res.dropped ? '  (' + res.dropped + ' dropped, pause too short)' : ''),
+      'samples     : ' + samples.length + '  (' + rate.toFixed(0) + ' Hz over ' + elapsed.toFixed(1) + 's)',
+      'reps shown  : ' + res.reps.length,
       ''
     ];
+    // Every phase it found, with the gap to the next one. Without this a dropped set says
+    // only that something was wrong; with it, "no pause at all" and "a spurious phase split
+    // the pause in two" are told apart at a glance, and they need opposite fixes.
+    lines.push('phases detected (' + s.phases.length + '):');
+    s.phases.forEach(function(ph, i) {
+      const gap = (i + 1 < s.phases.length) ? ((s.phases[i + 1].start - ph.end) / 1000).toFixed(2) + 's' : '-';
+      lines.push('  ' + (ph.dir > 0 ? 'up  ' : 'down') + '  at ' + ((ph.start - s.t[0]) / 1000).toFixed(1).padStart(5)
+        + 's  lasting ' + ph.dur.toFixed(2) + 's  peak ' + ph.peak.toFixed(3) + '  then gap ' + gap);
+    });
+    lines.push('');
     res.reps.forEach(function(r, i) {
       const f = v => (v === null || v === undefined) ? '  -  ' : (v.toFixed(1) + 's').padStart(5);
-      lines.push('rep ' + (i + 1) + ':  P1 ' + f(r.phase1Duration) + '   pause ' + f(r.pause1Duration)
-        + '   P2 ' + f(r.phase2Duration) + '   pause ' + f(r.pause2Duration)
-        + '   score ' + r.composite.toFixed(0));
+      // An unresolved pause is flagged here too, so a pasted result cannot be read as if the
+      // figure were a measurement.
+      const q = (v, bad) => f(v) + (bad ? '!' : ' ');
+      lines.push('rep ' + (i + 1) + ':  P1 ' + f(r.phase1Duration) + '   pause ' + q(r.pause1Duration, r.pause1Unresolved)
+        + '  P2 ' + f(r.phase2Duration) + '   pause ' + q(r.pause2Duration, r.pause2Unresolved)
+        + '  score ' + r.composite.toFixed(0));
     });
+    if (res.reps.some(r => r.pause1Unresolved || r.pause2Unresolved))
+      lines.push('', '( ! = pause below the resolution floor, not a measurement )');
     if (weakSignalNote.style.display === 'block') lines.push('', 'WARNING: ' + weakSignalNote.textContent);
     if (longPauseNote.style.display === 'block') lines.push('', 'NOTE: ' + longPauseNote.textContent);
     if (coachLine.style.display === 'block') lines.push('', coachLine.textContent);
@@ -791,6 +827,24 @@ function coachingFor(reps, tgt) {
       copyBtn.parentNode.insertBefore(ta, copyBtn.nextSibling);
       ta.select();
     }
+  });
+
+  // The recording itself, so a trial that went wrong can be replayed through the segmenter
+  // offline instead of being argued about from summary numbers.
+  const rawBtn = $('rawBtn');
+  rawBtn.addEventListener('click', function() {
+    if (!samples.length) return;
+    const t0 = samples[0].t;
+    const rows = ['t_ms,magnitude'];
+    for (const s of samples) rows.push((s.t - t0).toFixed(1) + ',' + s.mag.toFixed(4));
+    const blob = new Blob([rows.join('\n')], { type: 'text/csv' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = 'rep-set-' + new Date().toISOString().slice(0, 19).replace(/[:T]/g, '-') + '.csv';
+    document.body.appendChild(a); a.click(); document.body.removeChild(a);
+    setTimeout(function() { URL.revokeObjectURL(url); }, 2000);
+    rawBtn.textContent = 'Saved'; setTimeout(function(){ rawBtn.textContent = 'Download raw signal (.csv)'; }, 1600);
   });
 
   sizeCanvas(); drawTrend(null);
