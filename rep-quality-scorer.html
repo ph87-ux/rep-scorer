@@ -145,6 +145,7 @@
     <div style="font-size:11px;color:var(--dim);margin-top:8px;line-height:1.4;text-align:center;">
       The bar shows live movement against the detection threshold — it should swing clearly during a rep.
       Reps, phase times and coaching are worked out from the whole set when you press Stop.
+      The screen is held awake while recording, so a long set is not cut short by auto-lock.
     </div>
   </div>
 
@@ -157,7 +158,7 @@
   <div class="panel">
     <div class="panel-title">Debug / Tuning</div>
     <div class="tempo-grid" style="grid-template-columns:1fr 1fr;">
-      <div class="tempo-field"><label>Min accel thresh</label><input type="number" id="aThreshIn" value="0.02" step="0.005" min="0.005"></div>
+      <div class="tempo-field"><label>Min accel thresh</label><input type="number" id="aThreshIn" value="0.012" step="0.002" min="0.004"></div>
       <div class="tempo-field"><label>Min pause (s)</label><input type="number" id="minPauseIn" value="0.6" step="0.1" min="0.3"></div>
     </div>
     <div class="live-row" style="margin-top:10px;">
@@ -165,12 +166,12 @@
       <div class="live-box"><div class="lbl">threshold</div><div class="val" id="dbgThresh" style="font-size:13px">—</div></div>
       <div class="live-box"><div class="lbl">peak accel</div><div class="val" id="dbgAPeak" style="font-size:13px">—</div></div>
     </div>
-    <div class="warn-note" id="weakSignalNote"></div>
-    <div style="font-size:11px;color:var(--dim);margin-top:8px;line-height:1.4;">The whole set is analysed when you press Stop, which lets it filter without lag and see each turnaround in context. Gravity and sensor noise are measured from your own recording — no per-machine setup. <b>Peak accel</b> must clearly beat <b>threshold</b> or reps get missed; at a 4&nbsp;s tempo a 300&nbsp;mm stroke peaks near 0.09&nbsp;m/s², 150&nbsp;mm near 0.046. Pauses shorter than about 0.6&nbsp;s cannot be separated from the stroke either side.</div>
+    <div style="font-size:11px;color:var(--dim);margin-top:8px;line-height:1.4;">The whole set is analysed when you press Stop, which lets it filter without lag and see each turnaround in context. Gravity and sensor noise are measured from your own recording — no per-machine setup.<br><br><b>Peak accel needs to be at least 3× threshold.</b> Below that, phase times read short rather than reps being missed outright, which is the one failure you cannot spot by eye — so it is called out above the score. Acceleration goes as stroke ÷ time², so halving the tempo costs four times the signal: <b>stroke in mm ≳ 10 × (phase seconds)²</b> on a firm mount, roughly 16× on a loose one. At a 4&nbsp;s tempo that is about 160&nbsp;mm firm, 250&nbsp;mm loose. Mount rigidity moves this more than anything else here. Pauses shorter than about 0.6&nbsp;s cannot be separated from the strokes either side.</div>
   </div>
 
   <div class="panel">
     <div class="panel-title">Set Summary</div>
+    <div class="warn-note" id="weakSignalNote" style="margin-top:0;margin-bottom:12px;"></div>
     <div class="summary-score">
       <div class="num" id="summaryNum">—</div>
       <div class="lbl" id="summaryLbl">no reps yet</div>
@@ -186,6 +187,7 @@
   <div class="panel">
     <div class="panel-title">Reps</div>
     <div id="repList"><div class="empty-note">Press Stop when the set is done — reps and phase times appear here.</div></div>
+    <button class="btn btn-ghost" id="copyBtn" style="margin-top:10px; margin-bottom:0; display:none;">Copy results</button>
   </div>
 
   <footer>Runs entirely on-device · mount the phone rigidly to the stack carrier<br>Reads travel along gravity — built for vertical stacks, not horizontal-only machines</footer>
@@ -235,7 +237,7 @@ function robustSigma(x) {
 // samples: [{t: ms, mag: |raw acceleration|}] for a whole set.
 function segmentSet(samples, opts) {
   const o = Object.assign({
-    alpha: 0.25, noiseK: 3, threshFloor: 0.02,
+    alpha: 0.25, noiseK: 3, threshFloor: 0.012,
     minLobeMs: 120,        // shorter than this is a spike, not a stroke
     minLobePeak: 1.4,      // ...and it must clearly beat the threshold, not graze it
     longGapMs: 2500,       // opposite-sign lobes this far apart imply a missed lobe
@@ -423,6 +425,34 @@ function coachingFor(reps, tgt) {
 
   let sensorsReady = false, recording = false;
   let samples = [], setStartT = 0, liveMax = 0, lastResult = null;
+  let wakeLock = null;
+
+  // A 10-rep set at a 4s tempo is two minutes with nobody touching the screen, so iOS
+  // auto-lock fires partway through and the motion events simply stop — the set comes back
+  // truncated with nothing to say why. The screen is held awake for the duration instead.
+  // iOS drops the lock whenever the tab is backgrounded or a call comes in, so it is
+  // re-taken when the page becomes visible again rather than being requested once.
+  function holdScreenAwake() {
+    if (!('wakeLock' in navigator)) {
+      signalText.textContent = 'set auto-lock off';
+      return;
+    }
+    navigator.wakeLock.request('screen').then(function(lock) {
+      wakeLock = lock;
+      lock.addEventListener('release', function() { wakeLock = null; });
+    }).catch(function() {
+      // Refused (low battery, or not a user-visible tab). Say so rather than letting a set
+      // die halfway through for a reason the coach cannot see.
+      showError('Could not keep the screen awake. Set Settings → Display & Brightness → '
+        + 'Auto-Lock to Never before recording, or the set may be cut short.');
+    });
+  }
+  function releaseScreen() {
+    if (wakeLock) { try { wakeLock.release(); } catch (e) {} wakeLock = null; }
+  }
+  document.addEventListener('visibilitychange', function() {
+    if (recording && document.visibilityState === 'visible' && !wakeLock) holdScreenAwake();
+  });
 
   function targets() {
     return {
@@ -438,7 +468,7 @@ function coachingFor(reps, tgt) {
     // already told us how long a phase is meant to be, so the allowance is scaled to it
     // instead of guessed: at a slow tempo a longer quiet middle is expected, not suspicious.
     return {
-      threshFloor: parseFloat($('aThreshIn').value) || 0.02,
+      threshFloor: parseFloat($('aThreshIn').value) || 0.012,
       longGapMs: Math.max(2500, 0.45 * Math.max(tgt.p1, tgt.p2) * 1000)
     };
   }
@@ -496,6 +526,7 @@ function coachingFor(reps, tgt) {
 
   function render(res) {
     lastResult = res;
+    $('copyBtn').style.display = 'block';
     const tgt = res.targets;
     repList.innerHTML = '';
     if (!res.reps.length) {
@@ -563,7 +594,14 @@ function coachingFor(reps, tgt) {
 
     // Say plainly when the rig simply did not produce enough signal, rather than
     // reporting nothing and leaving the coach to guess why.
-    if (res.merged) {
+    if (res.dropped && !res.merged) {
+      weakSignalNote.style.display = 'block';
+      weakSignalNote.className = 'warn-note';
+      weakSignalNote.textContent = res.dropped + (res.dropped === 1 ? ' rep was' : ' reps were')
+        + ' left out: the turnaround was held for less than ' + res.minPause.toFixed(1)
+        + 's, which is too short to tell the end of one stroke from the start of the next. '
+        + 'Hold each turnaround a little longer and they will be measured.';
+    } else if (res.merged) {
       weakSignalNote.style.display = 'block';
       weakSignalNote.className = 'warn-note';
       weakSignalNote.textContent = res.merged + (res.merged === 1 ? ' stretch' : ' stretches')
@@ -605,10 +643,16 @@ function coachingFor(reps, tgt) {
     // a 30-second rep or no reps at all and leaving the coach to wonder which.
     const runLimit = 3 * Math.max(tgt.p1, tgt.p2) + 2;
     const merged = seg.phases.filter(p => p.dur > runLimit).length;
-    const scored = scoreSet(seg, tgt).filter(r =>
-      (r.pause1Duration === null || r.pause1Duration >= minPause * 0.5) &&
+    // Held to the stated floor, not half of it. This admitted pauses of 0.3s against a 0.6s
+    // setting, and a field trial duly produced a "rep" with a 0.3s pause and a 0.2s phase —
+    // scored 0 and shown with the same confidence as a real one. Below the floor the stroke
+    // boundaries are not resolvable, so the rep is not a bad rep, it is not a measurement.
+    const all = scoreSet(seg, tgt);
+    const scored = all.filter(r =>
+      (r.pause1Duration === null || r.pause1Duration >= minPause) &&
       r.p1.dur <= runLimit && r.p2.dur <= runLimit);
-    render({ seg, reps: scored, targets: tgt, merged: merged, runLimit: runLimit, minPause: minPause });
+    render({ seg, reps: scored, targets: tgt, merged: merged, runLimit: runLimit,
+             minPause: minPause, dropped: all.length - scored.length });
   }
 
   function tick() {
@@ -670,12 +714,15 @@ function coachingFor(reps, tgt) {
     longPauseNote.style.display = 'none';
     statusText.textContent = 'recording'; signalText.textContent = 'signal —';
     startSetBtn.style.display = 'none'; stopSetBtn.style.display = 'block';
+    errBox.style.display = 'none';
+    holdScreenAwake();
     drawTrend(null);
     requestAnimationFrame(tick);
   });
 
   stopSetBtn.addEventListener('click', function() {
     recording = false;
+    releaseScreen();
     statusText.textContent = 'stopped';
     phaseBig.textContent = 'SET COMPLETE'; phaseBig.className = 'phase-big phase-idle';
     phaseTime.textContent = samples.length + ' samples analysed';
@@ -685,7 +732,7 @@ function coachingFor(reps, tgt) {
   });
 
   resetBtn.addEventListener('click', function() {
-    recording = false; samples = []; lastResult = null;
+    recording = false; releaseScreen(); samples = []; lastResult = null;
     phaseBig.textContent = 'IDLE'; phaseBig.className = 'phase-big phase-idle';
     phaseTime.textContent = '—'; tempoFill.style.width = '0%'; tempoFill.className = 'tempo-fill';
     repList.innerHTML = '<div class="empty-note">Press Stop when the set is done — reps and phase times appear here.</div>';
@@ -694,12 +741,56 @@ function coachingFor(reps, tgt) {
     $('dbgNoise').textContent = '—'; $('dbgGRef').textContent = 'g —';
     $('dbgThresh').textContent = '—'; $('dbgAPeak').textContent = '—';
     coachLine.style.display = 'none'; weakSignalNote.style.display = 'none';
-    longPauseNote.style.display = 'none';
+    longPauseNote.style.display = 'none'; $('copyBtn').style.display = 'none';
     signalText.textContent = 'signal —';
     stopSetBtn.style.display = 'none'; startSetBtn.style.display = 'block';
     startSetBtn.disabled = !sensorsReady;
     statusText.textContent = sensorsReady ? 'ready' : 'idle';
     drawTrend(null);
+  });
+
+  // Field trials happen on a phone in a gym, where the only way to get numbers back out is a
+  // screenshot — and a screenshot crops exactly the diagnostic figures that matter. Everything
+  // needed to explain a set goes on the clipboard as plain text instead.
+  const copyBtn = $('copyBtn');
+  copyBtn.addEventListener('click', function() {
+    const res = lastResult;
+    if (!res) return;
+    const t = res.targets, s = res.seg;
+    const lines = [
+      'Rep Quality Scorer — set results',
+      'target tempo: ' + t.p1 + ' / ' + t.q1 + ' / ' + t.p2 + ' / ' + t.q2 + ' s',
+      'gravity ref : ' + s.gRef.toFixed(3),
+      'noise sigma : ' + s.sigma.toFixed(4),
+      'threshold   : ' + s.thr.toFixed(4),
+      'peak accel  : ' + s.peak.toFixed(4) + '  (' + (s.thr > 0 ? (s.peak / s.thr).toFixed(1) : '?')
+        + 'x threshold — needs 3x to be trustworthy)',
+      'samples     : ' + samples.length,
+      'reps shown  : ' + res.reps.length + (res.dropped ? '  (' + res.dropped + ' dropped, pause too short)' : ''),
+      ''
+    ];
+    res.reps.forEach(function(r, i) {
+      const f = v => (v === null || v === undefined) ? '  -  ' : (v.toFixed(1) + 's').padStart(5);
+      lines.push('rep ' + (i + 1) + ':  P1 ' + f(r.phase1Duration) + '   pause ' + f(r.pause1Duration)
+        + '   P2 ' + f(r.phase2Duration) + '   pause ' + f(r.pause2Duration)
+        + '   score ' + r.composite.toFixed(0));
+    });
+    if (weakSignalNote.style.display === 'block') lines.push('', 'WARNING: ' + weakSignalNote.textContent);
+    if (longPauseNote.style.display === 'block') lines.push('', 'NOTE: ' + longPauseNote.textContent);
+    if (coachLine.style.display === 'block') lines.push('', coachLine.textContent);
+    const text = lines.join('\n');
+    const done = () => { copyBtn.textContent = 'Copied'; setTimeout(function(){ copyBtn.textContent = 'Copy results'; }, 1600); };
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      navigator.clipboard.writeText(text).then(done).catch(function(){ showFallback(text); });
+    } else showFallback(text);
+    function showFallback(txt) {
+      // Clipboard access can be refused outright; falling back to a selectable box means the
+      // numbers are still recoverable by hand rather than lost.
+      const ta = document.createElement('textarea');
+      ta.value = txt; ta.style.cssText = 'width:100%;height:160px;margin-top:8px;background:var(--bg-deep);color:var(--ink);border:1px solid var(--line);border-radius:8px;font-family:var(--mono);font-size:11px;padding:8px;';
+      copyBtn.parentNode.insertBefore(ta, copyBtn.nextSibling);
+      ta.select();
+    }
   });
 
   sizeCanvas(); drawTrend(null);
