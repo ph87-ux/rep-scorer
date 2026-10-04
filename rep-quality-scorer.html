@@ -125,6 +125,7 @@
 
   <div class="panel">
     <div class="panel-title">Target Tempo (seconds)</div>
+    <div style="font-size:11px;color:var(--dim);margin:-4px 0 10px;line-height:1.4;">Phases lose marks only for being <b>rushed</b> — slower than target costs nothing. Pauses are judged both ways, with 20% either side free.</div>
     <div class="tempo-grid">
       <div class="tempo-field"><label>Phase 1</label><input type="number" id="t1" value="4" step="0.5" min="0.5"></div>
       <div class="tempo-field"><label>Pause 1</label><input type="number" id="p1" value="2" step="0.5" min="0"></div>
@@ -377,9 +378,28 @@ function segmentSet(samples, opts) {
 // hits 3.3s against a 3.0s target scored 50 while the coaching line called the same rep
 // on point — the score has to agree with the advice. The band is proportional, because
 // being 0.3s out on a 1s pause is a real miss and on a 4s stroke it is not.
-function scoreFromError(actual, target, tol) {
+// Phases and pauses are judged by different rules, because they are different faults.
+//
+// A phase slower than target is not a fault at all: time under tension is the point, and a
+// client who grinds out a 6s rep against a 4s target has not done anything to correct. Only
+// rushing loses marks. The fast side keeps a small fixed allowance because the segmenter's
+// own timing is good to roughly a tenth of a second, and penalising inside measurement error
+// is scoring noise rather than lifting.
+const FAST_GRACE = 0.2;
+function scorePhase(actual, target, tol) {
+  if (actual >= target) return 100;              // slower than asked: no penalty, by design
+  const err = target - actual;
+  if (err <= FAST_GRACE) return 100;
+  return Math.max(0, 100 - ((err - FAST_GRACE) / (tol * 2)) * 100);
+}
+
+// A pause is wrong in both directions — too short loses the hold, too long bleeds tension —
+// so it keeps a symmetric band, 20% of the target either side. The 0.15s floor only bites on
+// very short targets, where 20% would otherwise be finer than the measurement itself.
+const PAUSE_BAND = 0.20;
+function scorePause(actual, target, tol) {
   const err = Math.abs(actual - target);
-  const grace = Math.max(0.2, target * 0.15);
+  const grace = Math.max(0.15, target * PAUSE_BAND);
   if (err <= grace) return 100;
   return Math.max(0, 100 - ((err - grace) / (tol * 2)) * 100);
 }
@@ -388,14 +408,14 @@ function scoreSet(seg, tgt) {
   const TOL = tgt.tol;
   return seg.reps.map(r => {
     const parts = [
-      scoreFromError(r.phase1Duration, tgt.p1, TOL),
-      scoreFromError(r.phase2Duration, tgt.p2, TOL)
+      scorePhase(r.phase1Duration, tgt.p1, TOL),
+      scorePhase(r.phase2Duration, tgt.p2, TOL)
     ];
     // A pause below the resolution floor is excluded rather than scored as if it were a real
     // 0.2s hold — scoring an unmeasurable quantity is worse than leaving it out.
     const minP = tgt.minPause;
-    if (r.pause1Duration !== null && r.pause1Duration >= minP) parts.push(scoreFromError(r.pause1Duration, tgt.q1, TOL));
-    if (r.pause2Duration !== null && r.pause2Duration >= minP) parts.push(scoreFromError(r.pause2Duration, tgt.q2, TOL));
+    if (r.pause1Duration !== null && r.pause1Duration >= minP) parts.push(scorePause(r.pause1Duration, tgt.q1, TOL));
+    if (r.pause2Duration !== null && r.pause2Duration >= minP) parts.push(scorePause(r.pause2Duration, tgt.q2, TOL));
     // The score is tempo and nothing else. A smoothness term lived here, built from the jerk
     // across each phase, and it was dropped: the sensor's own noise floor swamped it, so a
     // mathematically perfect rep and a deliberately juddering one scored within a few points
@@ -407,29 +427,36 @@ function scoreSet(seg, tgt) {
 
 // The one thing to work on next time: whichever of the four phases sits furthest
 // from its target on average. A single named fault is coachable; four numbers are not.
+// The one thing to work on next time: whichever of the four slots scores worst, not whichever
+// sits furthest from its target. Those differ now that slow phases are free — judged on raw
+// distance a 7s phase against a 4s target would be named as the headline fault while scoring
+// a perfect 100, and the advice would contradict the number beside it.
 function coachingFor(reps, tgt) {
   if (!reps.length) return null;
   const defs = [
-    { key: 'phase1Duration', label: 'Phase 1', target: tgt.p1 },
-    { key: 'pause1Duration', label: 'Pause 1', target: tgt.q1 },
-    { key: 'phase2Duration', label: 'Phase 2', target: tgt.p2 },
-    { key: 'pause2Duration', label: 'Pause 2', target: tgt.q2 }
+    { key: 'phase1Duration', label: 'Phase 1', target: tgt.p1, pause: false },
+    { key: 'pause1Duration', label: 'Pause 1', target: tgt.q1, pause: true },
+    { key: 'phase2Duration', label: 'Phase 2', target: tgt.p2, pause: false },
+    { key: 'pause2Duration', label: 'Pause 2', target: tgt.q2, pause: true }
   ];
   let worst = null;
   for (const d of defs) {
     const vals = reps.map(r => r[d.key]).filter(v => v !== null && v !== undefined);
     if (!vals.length) continue;
     const mean = vals.reduce((a, b) => a + b, 0) / vals.length;
-    const err = mean - d.target;
-    if (!worst || Math.abs(err) > Math.abs(worst.err)) worst = { label: d.label, mean, target: d.target, err };
+    const score = d.pause ? scorePause(mean, d.target, tgt.tol) : scorePhase(mean, d.target, tgt.tol);
+    if (!worst || score < worst.score) worst = { label: d.label, mean, target: d.target, score, pause: d.pause };
   }
   if (!worst) return null;
-  if (Math.abs(worst.err) <= tgt.tol) {
-    return { good: true, text: 'Tempo on point — all four phases within ' + tgt.tol.toFixed(1) + 's of target' };
+  if (worst.score >= 90) {
+    return { good: true, text: 'Tempo on point — nothing in this set is costing marks' };
   }
+  const diff = worst.mean - worst.target;
+  const how = worst.pause
+    ? (diff > 0 ? 'held ' + diff.toFixed(1) + 's too long' : 'cut ' + Math.abs(diff).toFixed(1) + 's short')
+    : 'rushed by ' + Math.abs(diff).toFixed(1) + 's';
   return { good: false, text: 'Work on: ' + worst.label + ' — averaged ' + worst.mean.toFixed(1)
-    + 's against a ' + worst.target.toFixed(1) + 's target (' + (worst.err > 0 ? 'too slow by ' : 'too quick by ')
-    + Math.abs(worst.err).toFixed(1) + 's)' };
+    + 's against a ' + worst.target.toFixed(1) + 's target, ' + how };
 }
 
 // --- UI ---------------------------------------------------------------------
@@ -542,13 +569,13 @@ function coachingFor(reps, tgt) {
     trendCtx.fillText(res.reps.length + (res.reps.length === 1 ? ' rep' : ' reps'), w - 44, 10);
   }
 
-  function cell(label, val, target, tol, unresolved) {
+  function cell(label, val, target, tol, unresolved, isPause) {
     if (val === null || val === undefined) return '<div class="pt"><span class="ptk">' + label + '</span><span class="ptv">—</span></div>';
     // Shown in full, but marked: the stroke boundaries either side of a pause this short are
     // not separable, so the figure is an artefact of where the threshold happened to fall.
     if (unresolved) return '<div class="pt" style="opacity:.55"><span class="ptk">' + label
       + '</span><span class="ptv" style="font-size:11px">&lt;' + tol.toFixed(1) + 's<br>unresolved</span></div>';
-    const cls = scoreClass(scoreFromError(val, target, tol));
+    const cls = scoreClass(isPause ? scorePause(val, target, tol) : scorePhase(val, target, tol));
     return '<div class="pt"><span class="ptk">' + label + '</span><span class="ptv ' + cls + '">' + val.toFixed(1) + 's</span></div>';
   }
 
@@ -569,9 +596,9 @@ function coachingFor(reps, tgt) {
           '<div class="rep-composite ' + scoreClass(r.composite) + '">' + r.composite.toFixed(0) + '</div></div>' +
           '<div class="phase-times">' +
             cell('P1', r.phase1Duration, tgt.p1, tgt.tol) +
-            cell('pause', r.pause1Duration, tgt.q1, tgt.minPause, r.pause1Unresolved) +
+            cell('pause', r.pause1Duration, tgt.q1, tgt.minPause, r.pause1Unresolved, true) +
             cell('P2', r.phase2Duration, tgt.p2, tgt.tol) +
-            cell('pause', r.pause2Duration, tgt.q2, tgt.minPause, r.pause2Unresolved) +
+            cell('pause', r.pause2Duration, tgt.q2, tgt.minPause, r.pause2Unresolved, true) +
           '</div>';
         repList.appendChild(d);
       });
