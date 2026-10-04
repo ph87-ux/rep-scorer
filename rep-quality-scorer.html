@@ -153,6 +153,9 @@
   </header>
 
   <button class="btn btn-primary" id="permitBtn">Enable Motion Access</button>
+  <div class="set-hide" style="font-size:11px;color:var(--dim);text-align:center;margin:-4px 0 12px;line-height:1.4;">
+    Enable motion to record and score a set. Without it the tempo ring still runs, so this page
+    can be used purely as a pacer on a coach's own phone.</div>
   <div class="err" id="errBox"></div>
 
   <div class="panel set-hide">
@@ -166,7 +169,7 @@
     </div>
   </div>
 
-  <button class="btn btn-primary" id="startSetBtn" disabled>Start Set</button>
+  <button class="btn btn-primary" id="startSetBtn">Start Set</button>
   <button class="btn btn-stop" id="stopSetBtn" style="display:none">Stop Set</button>
   <button class="btn btn-ghost set-hide" id="resetBtn">Reset</button>
 
@@ -1049,7 +1052,10 @@ function coachingFor(slots) {
   });
 
   startSetBtn.addEventListener('click', function() {
-    if (!sensorsReady) return;
+    // The ring paces from the clock alone, so it works with no sensor at all. That is what
+    // lets a coach run the tempo on their own phone while each client's phone only records —
+    // the two never need to talk to each other, and on a busy floor the ring is then always
+    // in the coach's hand rather than clamped to a stack at knee height.
     samples = []; liveMax = 0; lastResult = null;
     setStartT = performance.now(); recording = true;
     // The analysis needs a second or two of stillness to measure gravity and the noise floor,
@@ -1060,7 +1066,8 @@ function coachingFor(slots) {
     $('phaseAverages').innerHTML = '';
     coachLine.style.display = 'none'; weakSignalNote.style.display = 'none';
     longPauseNote.style.display = 'none';
-    statusText.textContent = 'recording'; signalText.textContent = 'signal —';
+    statusText.textContent = sensorsReady ? 'recording' : 'pacing only';
+    signalText.textContent = sensorsReady ? 'signal —' : 'no sensor';
     startSetBtn.style.display = 'none'; stopSetBtn.style.display = 'block';
     document.body.classList.add('set-running');
     errBox.style.display = 'none';
@@ -1079,6 +1086,15 @@ function coachingFor(slots) {
     tempoFill.style.width = '0%'; tempoFill.className = 'tempo-fill';
     stopSetBtn.style.display = 'none'; startSetBtn.style.display = 'block';
     resetRing('DONE');
+    // Nothing was recorded, so there is nothing to analyse and no results to invent.
+    if (!sensorsReady || !samples.length) {
+      repList.innerHTML = '<div class="empty-note">Pacing only — motion access was not enabled, '
+        + 'so this set was not recorded.</div>';
+      summaryNum.textContent = '—'; summaryNum.className = 'num';
+      summaryLbl.textContent = 'not recorded';
+      $('phaseAverages').innerHTML = '';
+      return;
+    }
     analyse();
   });
 
@@ -1096,7 +1112,6 @@ function coachingFor(slots) {
     $('rawBtn').style.display = 'none';
     signalText.textContent = 'signal —';
     stopSetBtn.style.display = 'none'; startSetBtn.style.display = 'block';
-    startSetBtn.disabled = !sensorsReady;
     statusText.textContent = sensorsReady ? 'ready' : 'idle';
     resetRing();
     drawTrend(null);
