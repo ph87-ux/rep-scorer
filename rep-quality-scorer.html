@@ -69,9 +69,13 @@
   .ring-arc.pause { stroke:var(--warn); }
   .ring-centre { position:absolute; inset:0; display:flex; flex-direction:column;
     align-items:center; justify-content:center; text-align:center; }
-  .ring-cue { font-size:20px; font-weight:700; letter-spacing:.02em; }
-  .ring-count { font-size:72px; font-weight:800; line-height:1; letter-spacing:-.045em; color:var(--ink); }
-  .ring-rep { font-size:12px; color:var(--dim); letter-spacing:.04em; font-weight:600; margin-top:2px; }
+  /* No countdown digit: the client should be reading the ring, not a number. The cue takes
+     the space the number had, so it stays legible at a glance from the machine. The element
+     is kept in the DOM and hidden rather than removed, so the settle-in counter and every
+     other writer still have somewhere to write. */
+  .ring-cue { font-size:42px; font-weight:800; letter-spacing:-.01em; line-height:1.1; }
+  .ring-count { display:none; }
+  .ring-rep { font-size:14px; color:var(--dim); letter-spacing:.04em; font-weight:600; margin-top:8px; }
   .cue-move { color:var(--blue); }
   .cue-hold { color:var(--warn); }
   .cue-idle { color:var(--dim); }
@@ -1033,9 +1037,8 @@ function coachingFor(slots) {
     if (!ringToggle.checked) {
       // No ring on this machine: just enough to show the set is running and being captured.
       ringCue.textContent = 'RECORDING'; ringCue.className = 'ring-cue cue-move';
-      ringCount.textContent = ((performance.now() - setStartT) / 1000).toFixed(0);
-      ringCount.className = 'ring-count cue-idle';
-      ringRep.textContent = samples.length + ' SAMPLES';
+      ringRep.textContent = ((performance.now() - setStartT) / 1000).toFixed(0) + 's · '
+        + samples.length + ' SAMPLES';
       ringArc.style.strokeDashoffset = String(RING_CIRC);
       requestAnimationFrame(tick);
       return;
@@ -1044,9 +1047,8 @@ function coachingFor(slots) {
     if (sinceStart < 0) {
       ringArc.style.strokeDashoffset = String(RING_CIRC);
       ringArc.className.baseVal = 'ring-arc';
-      ringCue.textContent = 'SET UP'; ringCue.className = 'ring-cue cue-idle';
-      ringCount.textContent = Math.ceil(-sinceStart / 1000).toFixed(0);
-      ringCount.className = 'ring-count cue-idle';
+      ringCue.textContent = Math.ceil(-sinceStart / 1000).toFixed(0);
+      ringCue.className = 'ring-cue cue-idle';
       ringRep.textContent = 'HOLD STILL';
     } else drawRing(sinceStart / 1000, targets());
     const secs = (performance.now() - setStartT) / 1000;
