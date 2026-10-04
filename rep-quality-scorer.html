@@ -755,6 +755,26 @@ function coachingFor(slots) {
         + '<span class="pa-score ' + scoreClass(s.score) + '">' + s.score.toFixed(0) + '</span></div>';
     }).join('');
 
+    // On a machine the stack returns to the same place every rep, so the concentric and the
+    // eccentric cover the SAME distance. Physics guarantees it in a way no calibration can,
+    // which makes it the one check that can catch a plausible-looking but wrong measurement
+    // from the inside. A freehand trial read 251mm up against 80mm down, which no stack can
+    // do. Partial reps are the one honest way to produce it, so the wording says both.
+    const cSlot = slots.find(s => s.label === 'Concentric');
+    const eSlot = slots.find(s => s.label === 'Eccentric');
+    let travelWarn = null;
+    if (cSlot && eSlot && cSlot.travel && eSlot.travel) {
+      const big = Math.max(cSlot.travel, eSlot.travel), small = Math.min(cSlot.travel, eSlot.travel);
+      const diff = (big - small) / big;
+      if (diff > 0.3) {
+        travelWarn = 'Concentric and eccentric travel disagree: ~' + (cSlot.travel * 1000).toFixed(0)
+          + 'mm up against ~' + (eSlot.travel * 1000).toFixed(0) + 'mm down, a '
+          + (diff * 100).toFixed(0) + '% difference. On a machine the stack returns to the same '
+          + 'place each rep, so these should match. Either the reps are not returning to the '
+          + 'start, or one phase is being mis-measured and its time should not be trusted.';
+      }
+    }
+
     const rated = slots.filter(s => s.n);
     if (res.reps.length && rated.length) {
       const avg = rated.reduce((a, s) => a + s.score, 0) / rated.length;
@@ -832,6 +852,9 @@ function coachingFor(slots) {
         + ' held for less than ' + res.minPause.toFixed(1) + 's, too short to tell the end of one '
         + 'stroke from the start of the next. Those pauses are marked unresolved and left out of '
         + 'the score — the phase times either side of them still stand.';
+    } else if (travelWarn) {
+      noteBad = true;
+      note = travelWarn;
     } else if (seg.peak > 0 && ratio < SIGNAL_MARGINAL) {
       note = 'Signal marginal: peak ' + seg.peak.toFixed(4) + ' m/s² is only ' + ratio.toFixed(1)
         + '× the ' + seg.thr.toFixed(4) + ' threshold. Phase times may read short. Mount more '
@@ -1014,6 +1037,13 @@ function coachingFor(slots) {
         + 's  lasting ' + ph.dur.toFixed(2) + 's  peak ' + ph.peak.toFixed(3) + '  then gap ' + gap);
     });
     lines.push('');
+    const cs = phaseSlots(res).find(function(s){return s.label==='Concentric';});
+    const es = phaseSlots(res).find(function(s){return s.label==='Eccentric';});
+    if (cs && es && cs.travel && es.travel) {
+      const bigT = Math.max(cs.travel, es.travel), smallT = Math.min(cs.travel, es.travel);
+      lines.push('travel match: ' + ((smallT / bigT) * 100).toFixed(0)
+        + '%  (up and down should cover the same distance on a machine)');
+    }
     lines.push('set averages by phase:');
     phaseSlots(res).forEach(function(s) {
       lines.push('  ' + s.label.padEnd(11) + (s.n
