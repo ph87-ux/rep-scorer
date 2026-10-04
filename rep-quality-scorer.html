@@ -175,6 +175,10 @@
       <div class="live-box"><div class="lbl">threshold</div><div class="val" id="dbgThresh" style="font-size:13px">—</div></div>
       <div class="live-box"><div class="lbl">peak accel</div><div class="val" id="dbgAPeak" style="font-size:13px">—</div></div>
     </div>
+    <div style="margin-top:10px;">
+      <label style="font-size:11px;color:var(--dim);display:block;margin-bottom:4px;">Re-analyse a saved recording (.csv)</label>
+      <input type="file" id="csvIn" accept=".csv,text/csv" style="font-size:11px;color:var(--dim);width:100%;">
+    </div>
     <div style="font-size:11px;color:var(--dim);margin-top:8px;line-height:1.4;">The whole set is analysed when you press Stop, which lets it filter without lag and see each turnaround in context. Gravity and sensor noise are measured from your own recording — no per-machine setup.<br><br><b>Peak accel needs to be at least 3× threshold.</b> Below that, phase times read short rather than reps being missed outright, which is the one failure you cannot spot by eye — so it is called out above the score. Acceleration goes as stroke ÷ time², so halving the tempo costs four times the signal: <b>stroke in mm ≳ 10 × (phase seconds)²</b> on a firm mount, roughly 16× on a loose one. At a 4&nbsp;s tempo that is about 160&nbsp;mm firm, 250&nbsp;mm loose. Mount rigidity moves this more than anything else here. Pauses shorter than about 0.6&nbsp;s cannot be separated from the strokes either side.</div>
   </div>
 
@@ -402,6 +406,46 @@ function segmentSet(samples, opts) {
     }
   }
   return { gRef, sigma, thr, peak, phases, reps, alternation, t, a, af };
+}
+
+// The smoothing is chosen per set, not fixed in advance, for two reasons.
+//
+// First, alpha is a fraction PER SAMPLE, so a fixed value is a different filter on different
+// hardware: at the 25 Hz used throughout development it passes 1.1 Hz, but phones report at
+// 60 Hz, where the same alpha passes 2.75 Hz. Every field recording was therefore being
+// filtered well over twice as loosely as anything that had been validated. The cutoff is now
+// stated in Hz and the alpha derived from the recording's own measured rate.
+//
+// Second, no one cutoff suits every set: a 4s phase carries its energy near 0.125 Hz and
+// wants heavy smoothing, while a 0.8s phase needs eight times the bandwidth to survive. So a
+// ladder of cutoffs is tried and the one whose phases alternate best is kept — alternation
+// being the property real reps must have, which makes it the right thing to optimise. A
+// recording that produced nineteen fragments and 39% alternation at the fixed setting yields
+// eight clean phases and 86% this way.
+const CUTOFF_LADDER = [2.0, 1.4, 1.0, 0.7, 0.5, 0.35];
+function segmentBest(samples, opts) {
+  if (!samples || samples.length < 20) return segmentSet(samples, opts);
+  const span = (samples[samples.length - 1].t - samples[0].t) / 1000;
+  const hz = span > 0 ? samples.length / span : 60;
+  let best = null;
+  for (const fc of CUTOFF_LADDER) {
+    const alpha = 1 - Math.exp(-2 * Math.PI * fc / hz);
+    const r = segmentSet(samples, Object.assign({}, opts, { alpha: alpha }));
+    // Over-smoothing wins on alternation by leaving almost nothing behind, so a candidate
+    // must still show enough phases to be a set before its alternation counts.
+    if (r.phases.length < 4) continue;
+    r.cutoffHz = fc; r.sampleHz = hz;
+    if (!best || r.alternation > best.alternation + 0.02 ||
+        (Math.abs(r.alternation - best.alternation) <= 0.02 && r.reps.length > best.reps.length)) {
+      best = r;
+    }
+  }
+  if (!best) {
+    const alpha = 1 - Math.exp(-2 * Math.PI * 1.0 / hz);
+    best = segmentSet(samples, Object.assign({}, opts, { alpha: alpha }));
+    best.cutoffHz = 1.0; best.sampleHz = hz;
+  }
+  return best;
 }
 
 // --- scoring ----------------------------------------------------------------
@@ -770,7 +814,7 @@ function coachingFor(slots) {
 
   function analyse() {
     const tgt = targets();
-    const seg = segmentSet(samples, segOpts(tgt));
+    const seg = segmentBest(samples, segOpts(tgt));
     const minPause = parseFloat($('minPauseIn').value) || 0.6;
 
     // When the pause between strokes is shorter than the filter can resolve, the
@@ -923,6 +967,7 @@ function coachingFor(slots) {
       'samples     : ' + samples.length + '  (' + rate.toFixed(0) + ' Hz over ' + elapsed.toFixed(1) + 's)',
       'reps shown  : ' + res.reps.length,
       'alternation : ' + (s.alternation * 100).toFixed(0) + '%  (reps alternate direction; under 50% means unreadable)',
+      'smoothing   : ' + (s.cutoffHz ? s.cutoffHz.toFixed(2) + ' Hz cutoff, chosen from this set' : 'n/a'),
       ''
     ];
     // Every phase it found, with the gap to the next one. Without this a dropped set says
@@ -987,6 +1032,35 @@ function coachingFor(slots) {
     document.body.appendChild(a); a.click(); document.body.removeChild(a);
     setTimeout(function() { URL.revokeObjectURL(url); }, 2000);
     rawBtn.textContent = 'Saved'; setTimeout(function(){ rawBtn.textContent = 'Download raw signal (.csv)'; }, 1600);
+  });
+
+  // Load a previously downloaded recording back in. This closes the loop on the CSV export:
+  // a set can be re-scored against different targets, or a past set re-examined, without
+  // having to lift it again. It is also the only way to verify a change against a real
+  // recording with its true timestamps intact.
+  $('csvIn').addEventListener('change', function(e) {
+    const file = e.target.files && e.target.files[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = function() {
+      const lines = String(reader.result).trim().split(/\r?\n/);
+      const loaded = [];
+      for (let i = 0; i < lines.length; i++) {
+        const parts = lines[i].split(',');
+        if (parts.length < 2) continue;
+        const t = parseFloat(parts[0]), m = parseFloat(parts[1]);
+        if (isNaN(t) || isNaN(m)) continue;     // skips the header row
+        loaded.push({ t: t, mag: m });
+      }
+      if (loaded.length < 20) { showError('That file has too few samples to analyse.'); return; }
+      recording = false; samples = loaded;
+      statusText.textContent = 'loaded';
+      phaseBig.textContent = 'LOADED'; phaseBig.className = 'phase-big phase-idle';
+      phaseTime.textContent = samples.length + ' samples from file';
+      errBox.style.display = 'none';
+      analyse();
+    };
+    reader.readAsText(file);
   });
 
   sizeCanvas(); drawTrend(null);
