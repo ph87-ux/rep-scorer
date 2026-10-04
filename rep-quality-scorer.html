@@ -162,7 +162,7 @@
 
   <header>
     <div>
-      <div class="brand">Prototype · build 04 Oct 05:47 UTC</div>
+      <div class="brand">Prototype · build 04 Oct 06:00 UTC</div>
       <h1>Rep Quality Scorer</h1>
     </div>
     <div class="status-row">
@@ -676,6 +676,15 @@ function coachingFor(slots) {
   // client cues MOVE / PAUSE.
   const CLIENT_FACING = false;
 
+  // The phone is clamped to the stack, so reaching over to press Stop after the last rep is
+  // awkward. The set therefore ends itself once the stack has been still for a good while.
+  // Twelve seconds is far longer than any pause inside a set — a grinding rest between reps
+  // runs to five or six at the outside — so it cannot fire mid-set. Arming only after real
+  // movement has been seen keeps it from firing during the hold-still countdown at the
+  // start. Pressing Stop still works and is always quicker.
+  const AUTO_STOP_MS = 12000, AUTO_WARN_MS = 7000;
+  let lastMotionT = 0, sawMotion = false;
+
   // A 10-rep set at a 4s tempo is two minutes with nobody touching the screen, so iOS
   // auto-lock fires partway through and the motion events simply stop — the set comes back
   // truncated with nothing to say why. The screen is held awake for the duration instead.
@@ -1052,36 +1061,63 @@ function coachingFor(slots) {
 
   function tick() {
     if (!recording) return;
+    const now = performance.now();
+
+    // Movement and stillness are judged BEFORE anything is drawn, so they hold whether or not
+    // the ring is showing. Behind the early return they only ran with the ring on, which left
+    // auto-stop silently dead on exactly the machines where reaching for Stop is hardest.
+    const recent = samples.slice(-25).map(s => s.mag);
+    let thr = 0.02;
+    if (recent.length > 8) {
+      const g = median(recent), pk = Math.max.apply(null, recent.map(m => Math.abs(m - g)));
+      liveMax = Math.max(liveMax, pk);
+      thr = Math.max(0.012, 3 * robustSigma(samples.slice(-200).map(s => s.mag)) * 0.29);
+      const frac = Math.min(1, pk / (thr * 4));
+      tempoFill.style.width = (frac * 100) + '%';
+      tempoFill.className = 'tempo-fill' + (pk > thr ? '' : ' pause');
+      signalText.textContent = liveMax > thr * 1.5 ? 'signal ok' : 'signal weak';
+      // Stillness is judged on the MEAN deviation, not the peak. The peak of 25 noise samples
+      // sits around 2.5 sigma, which clears the threshold on its own, so a peak test calls a
+      // motionless stack "moving" and the timer never accumulates. The mean is about 0.8
+      // sigma when still and several times the threshold mid-stroke, which separates cleanly.
+      let dev = 0;
+      for (const m of recent) dev += Math.abs(m - g);
+      dev /= recent.length;
+      // The multiplier has to clear what stillness itself produces. With the floor binding,
+      // a motionless stack already shows a mean deviation around 0.8x the threshold, so a
+      // 0.8 multiplier called it moving forever and auto-stop never fired. Mid-stroke the
+      // same measure runs about 1.9x on a marginal rig and 5x on a good one, so 1.4 sits
+      // clear of stillness with room left to catch the weakest real movement.
+      if (dev > thr * 1.4) { lastMotionT = now; sawMotion = true; }
+    }
+    const still = sawMotion ? now - lastMotionT : 0;
+    if (sawMotion && still >= AUTO_STOP_MS) { finishSet(); return; }
+    const ending = (sawMotion && still >= AUTO_WARN_MS)
+      ? 'ENDING IN ' + Math.ceil((AUTO_STOP_MS - still) / 1000) : null;
+
+    const secs = (now - setStartT) / 1000;
+    phaseBig.textContent = 'RECORDING';
+    phaseBig.className = 'phase-big phase-moving';
+    phaseTime.textContent = secs.toFixed(0) + 's · ' + samples.length + ' samples';
+
     if (!ringToggle.checked) {
       // No ring on this machine: just enough to show the set is running and being captured.
       ringCue.textContent = 'RECORDING'; ringCue.className = 'ring-cue cue-move';
-      ringRep.textContent = ((performance.now() - setStartT) / 1000).toFixed(0) + 's · '
-        + samples.length + ' SAMPLES';
+      ringRep.textContent = ending || (secs.toFixed(0) + 's · ' + samples.length + ' SAMPLES');
       requestAnimationFrame(tick);
       return;
     }
-    const sinceStart = performance.now() - ringStart;
+    const sinceStart = now - ringStart;
     if (sinceStart < 0) {
       setBubble(R_MIN, false);
       ringCue.textContent = Math.ceil(-sinceStart / 1000).toFixed(0);
       ringCue.className = 'ring-cue cue-idle';
       ringRep.textContent = 'HOLD STILL';
-    } else drawRing(sinceStart / 1000, targets());
-    const secs = (performance.now() - setStartT) / 1000;
-    phaseBig.textContent = 'RECORDING';
-    phaseBig.className = 'phase-big phase-moving';
-    phaseTime.textContent = secs.toFixed(0) + 's · ' + samples.length + ' samples';
-    // Live bar is movement against the running threshold estimate — just enough to see
-    // the rig is being picked up. Everything measured comes later, from the whole set.
-    const recent = samples.slice(-25).map(s => s.mag);
-    if (recent.length > 8) {
-      const g = median(recent), pk = Math.max.apply(null, recent.map(m => Math.abs(m - g)));
-      liveMax = Math.max(liveMax, pk);
-      const thr = Math.max(0.02, 3 * robustSigma(samples.slice(-200).map(s => s.mag)) * 0.29);
-      const frac = Math.min(1, pk / (thr * 4));
-      tempoFill.style.width = (frac * 100) + '%';
-      tempoFill.className = 'tempo-fill' + (pk > thr ? '' : ' pause');
-      signalText.textContent = liveMax > thr * 1.5 ? 'signal ok' : 'signal weak';
+    } else {
+      drawRing(sinceStart / 1000, targets());
+      // Counted down out loud rather than ending without warning, so a client taking a
+      // breather mid-set can see it coming and move before it does.
+      if (ending) ringRep.textContent = ending;
     }
     requestAnimationFrame(tick);
   }
@@ -1120,6 +1156,7 @@ function coachingFor(slots) {
     if (!sensorsReady) return;
     samples = []; liveMax = 0; lastResult = null;
     setStartT = performance.now(); recording = true;
+    lastMotionT = setStartT; sawMotion = false;
     // The analysis needs a second or two of stillness to measure gravity and the noise floor,
     // so the ring holds the client at the start rather than launching straight into rep one.
     ringStart = setStartT + SETTLE_MS;
@@ -1139,7 +1176,8 @@ function coachingFor(slots) {
     requestAnimationFrame(tick);
   });
 
-  stopSetBtn.addEventListener('click', function() {
+  function finishSet() {
+    if (!recording) return;
     recording = false;
     document.body.classList.remove('set-running');
     releaseScreen();
@@ -1151,7 +1189,8 @@ function coachingFor(slots) {
     resetRing('DONE');
     $('tempoPanelTitle').textContent = 'Tempo';
     analyse();
-  });
+  }
+  stopSetBtn.addEventListener('click', finishSet);
 
   resetBtn.addEventListener('click', function() {
     recording = false; document.body.classList.remove('set-running'); releaseScreen(); samples = []; lastResult = null;
