@@ -245,7 +245,7 @@ function segmentSet(samples, opts) {
     minRelPeak: 0.3,       // ...and be comparable to the stroke beside it, or it is hover
     filtNoiseFactor: 0.29  // measured attenuation of filtfilt at this alpha
   }, opts || {});
-  const empty = { reps: [], phases: [], gRef: 0, sigma: 0, thr: 0, peak: 0, t: [], a: [], af: [] };
+  const empty = { reps: [], phases: [], gRef: 0, sigma: 0, thr: 0, peak: 0, alternation: 1, t: [], a: [], af: [] };
   if (!samples || samples.length < 20) return empty;
 
   const mag = samples.map(s => s.mag);
@@ -320,17 +320,37 @@ function segmentSet(samples, opts) {
   // discarded outright: that is the stack drifting, not the client pushing. The reference is
   // the nearest stroke, never the set's biggest, so a set that slows as it fatigues is
   // judged against the rep before it rather than against rep one.
-  let refPeak = 0;
+  // The reference is the last COMPLETED phase's peak, raised by the current group but never
+  // reset to a lone opening lobe. Setting it to each new lobe let it compound downward: one
+  // weak lobe slipping through dropped the bar to its level, so everything weaker after it
+  // passed too, and a hand-held trial duly shredded into eleven phases of wildly different
+  // strength. Note this bounds the slide rather than stopping it — amplitude alone cannot
+  // separate a fatiguing set, whose peaks genuinely fall severalfold, from a noisy one. The
+  // alternation check below is what actually catches that.
+  let lastPhasePeak = 0, groupPeak = 0;
+  const refNow = () => Math.max(lastPhasePeak, groupPeak);
+  const shut = () => { if (group.length) { lastPhasePeak = Math.max.apply(null, group.map(L => L.peak)); } closeGroup(); groupPeak = 0; };
   for (const L of kept) {
-    if (refPeak && L.peak < refPeak * o.minRelPeak) continue;
-    if (!group.length) { group = [L]; refPeak = L.peak; continue; }
+    const ref = refNow();
+    if (ref && L.peak < ref * o.minRelPeak) continue;
+    if (!group.length) { group = [L]; groupPeak = L.peak; continue; }
     const prev = group[group.length - 1];
     const gap = t[L.startI] - t[prev.endI];
-    if (L.sign !== prev.sign && gap < o.longGapMs) { group.push(L); refPeak = Math.max(refPeak, L.peak); }
-    else { closeGroup(); group = [L]; refPeak = L.peak; }
+    if (L.sign !== prev.sign && gap < o.longGapMs) { group.push(L); groupPeak = Math.max(groupPeak, L.peak); }
+    else { shut(); group = [L]; groupPeak = L.peak; }
   }
-  closeGroup();
+  shut();
   phases.forEach(p => { p.dur = (p.end - p.start) / 1000; });
+
+  // Reps alternate: up, down, up, down. So in a genuine set nearly every neighbouring pair
+  // of phases runs in opposite directions, and a set where they mostly do not is not a set
+  // of reps that scored badly — it is a recording the segmenter could not read as reps at
+  // all. Saying that is worth far more than emitting the one rep that happens to fall out
+  // of it. This is also the honest detector for travel that is not along gravity, which no
+  // amount of threshold tuning can rescue.
+  let alternations = 0;
+  for (let i = 1; i < phases.length; i++) if (phases[i].dir !== phases[i - 1].dir) alternations++;
+  const alternation = phases.length > 1 ? alternations / (phases.length - 1) : 1;
 
   // Reps: a phase one way followed by a phase the other way. Pause 2 belongs to the
   // rep but is only knowable once the following stroke begins.
@@ -349,7 +369,7 @@ function segmentSet(samples, opts) {
       i++;
     }
   }
-  return { gRef, sigma, thr, peak, phases, reps, t, a, af };
+  return { gRef, sigma, thr, peak, phases, reps, alternation, t, a, af };
 }
 
 // --- scoring ----------------------------------------------------------------
@@ -603,38 +623,47 @@ function coachingFor(reps, tgt) {
 
     // Say plainly when the rig simply did not produce enough signal, rather than
     // reporting nothing and leaving the coach to guess why.
-    if (res.unresolved && !res.merged) {
-      weakSignalNote.style.display = 'block';
-      weakSignalNote.className = 'warn-note';
-      weakSignalNote.textContent = res.unresolved + (res.unresolved === 1 ? ' turnaround was' : ' turnarounds were')
+    // Ordered by root cause, because the remedies differ and only the first one matters:
+    // too little signal is a mounting or tempo problem, unreadable direction is a geometry
+    // problem, and short pauses are a lifting problem. Naming the wrong one sends the coach
+    // off to fix something that was never broken.
+    const ratio = seg.thr > 0 ? seg.peak / seg.thr : 0;
+    const ups = seg.phases.filter(p => p.dir > 0).length;
+    let note = null, noteBad = false;
+    if (seg.peak > 0 && ratio < SIGNAL_UNUSABLE) {
+      noteBad = true;
+      note = 'Signal too weak: peak ' + seg.peak.toFixed(4) + ' m/s² is only ' + ratio.toFixed(1)
+        + '× the ' + seg.thr.toFixed(4) + ' threshold. Treat these phase times as unusable — a slow '
+        + 'rep reads short rather than being missed outright. Mount the phone more rigidly, use a '
+        + 'longer stroke, or lift to a quicker tempo.';
+    } else if (res.unreadable) {
+      noteBad = true;
+      note = 'Could not read this as reps. Of ' + seg.phases.length + ' movements detected, '
+        + ups + ' read as one direction and ' + (seg.phases.length - ups) + ' as the other — real '
+        + 'reps alternate, so direction was not resolved and no rep time here can be trusted. '
+        + 'Signal strength was not the problem (' + ratio.toFixed(1) + '× threshold). The usual '
+        + 'cause is travel that is not straight along gravity: sideways movement adds to the '
+        + 'reading whichever way you are going, so it registers as one direction only. Mount the '
+        + 'phone to something that can travel only up and down.';
+    } else if (res.merged) {
+      note = res.merged + (res.merged === 1 ? ' stretch' : ' stretches') + ' of this set ran past '
+        + res.runLimit.toFixed(0) + 's without a turnaround that could be placed, so reps there were '
+        + 'merged and left out. Hold each turnaround for at least ' + res.minPause.toFixed(1)
+        + 's — below that the end of one stroke and the start of the next are the same push.';
+    } else if (res.unresolved) {
+      note = res.unresolved + (res.unresolved === 1 ? ' turnaround was' : ' turnarounds were')
         + ' held for less than ' + res.minPause.toFixed(1) + 's, too short to tell the end of one '
         + 'stroke from the start of the next. Those pauses are marked unresolved and left out of '
-        + 'the score — the phase times either side of them still stand. Hold each turnaround a '
-        + 'little longer and the pauses will be measured too.';
-    } else if (res.merged) {
+        + 'the score — the phase times either side of them still stand.';
+    } else if (seg.peak > 0 && ratio < SIGNAL_MARGINAL) {
+      note = 'Signal marginal: peak ' + seg.peak.toFixed(4) + ' m/s² is only ' + ratio.toFixed(1)
+        + '× the ' + seg.thr.toFixed(4) + ' threshold. Phase times may read short. Mount more '
+        + 'rigidly, use a longer stroke, or lift to a quicker tempo.';
+    }
+    if (note) {
       weakSignalNote.style.display = 'block';
-      weakSignalNote.className = 'warn-note';
-      weakSignalNote.textContent = res.merged + (res.merged === 1 ? ' stretch' : ' stretches')
-        + ' of this set ran past ' + res.runLimit.toFixed(0) + 's without a turnaround that could be '
-        + 'placed, so reps there were merged and have been left out. Hold each turnaround for at '
-        + 'least ' + res.minPause.toFixed(1) + 's — below that the end of one stroke and the start '
-        + 'of the next are the same push and cannot be told apart.';
-    } else if (seg.peak > 0 && seg.peak < seg.thr * SIGNAL_MARGINAL) {
-      // Below about three times the threshold only the tips of each stroke clear it, and the
-      // failure is not a blank screen — it is four reps with plausible-looking short phase
-      // times that bear no relation to what the client did. That is the one failure a coach
-      // cannot catch by eye, so the ratio is stated and the numbers are called into question.
-      const ratio = seg.peak / seg.thr;
-      const bad = ratio < SIGNAL_UNUSABLE;
-      weakSignalNote.style.display = 'block';
-      weakSignalNote.className = 'warn-note' + (bad ? ' bad' : '');
-      weakSignalNote.textContent = (bad ? 'Signal too weak' : 'Signal marginal')
-        + ': peak ' + seg.peak.toFixed(4) + ' m/s² is only ' + ratio.toFixed(1)
-        + '× the ' + seg.thr.toFixed(4) + ' threshold'
-        + (bad ? '. Treat these phase times as unusable — a slow rep can read short rather than '
-                 + 'being missed outright. '
-               : '. Phase times may read short. ')
-        + 'Mount the phone more rigidly, use a longer stroke, or lift to a quicker tempo.';
+      weakSignalNote.className = 'warn-note' + (noteBad ? ' bad' : '');
+      weakSignalNote.textContent = note;
     } else weakSignalNote.style.display = 'none';
 
     drawTrend(res);
@@ -658,7 +687,11 @@ function coachingFor(reps, tgt) {
     // found four reps into "0 reps detected", which told the coach less than the bad number
     // it replaced. So the unresolvable pause is marked unresolved and kept out of the score,
     // and the phase times it sits between are still reported.
-    const all = scoreSet(seg, tgt);
+    // When the phases do not alternate, every rep drawn from them is an artefact of two
+    // same-direction phases happening to sit next to one odd one. Reporting a score for that
+    // is worse than reporting nothing, because it looks like a measurement.
+    const unreadable = seg.phases.length > 2 && seg.alternation < 0.5;
+    const all = unreadable ? [] : scoreSet(seg, tgt);
     const scored = all.filter(r => r.p1.dur <= runLimit && r.p2.dur <= runLimit);
     let unresolved = 0;
     scored.forEach(r => {
@@ -668,7 +701,8 @@ function coachingFor(reps, tgt) {
       if (r.pause2Unresolved) unresolved++;
     });
     render({ seg, reps: scored, targets: tgt, merged: merged, runLimit: runLimit,
-             minPause: minPause, dropped: all.length - scored.length, unresolved: unresolved });
+             minPause: minPause, dropped: all.length - scored.length, unresolved: unresolved,
+             unreadable: unreadable });
   }
 
   function tick() {
@@ -788,6 +822,7 @@ function coachingFor(reps, tgt) {
         + 'x threshold — needs 3x to be trustworthy)',
       'samples     : ' + samples.length + '  (' + rate.toFixed(0) + ' Hz over ' + elapsed.toFixed(1) + 's)',
       'reps shown  : ' + res.reps.length,
+      'alternation : ' + (s.alternation * 100).toFixed(0) + '%  (reps alternate direction; under 50% means unreadable)',
       ''
     ];
     // Every phase it found, with the gap to the next one. Without this a dropped set says
