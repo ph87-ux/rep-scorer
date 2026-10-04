@@ -162,7 +162,7 @@
 
   <header>
     <div>
-      <div class="brand">Prototype · build 04 Oct 06:33 UTC</div>
+      <div class="brand">Prototype · build 04 Oct 06:35 UTC</div>
       <h1>Rep Quality Scorer</h1>
     </div>
     <div class="status-row">
@@ -266,6 +266,7 @@
     <div class="panel-title">Reps</div>
     <div id="repList"><div class="empty-note">Press Stop when the set is done — reps and phase times appear here.</div></div>
     <button class="btn btn-ghost" id="copyBtn" style="margin-top:10px; margin-bottom:8px; display:none;">Copy results</button>
+    <button class="btn btn-ghost" id="jsonBtn" style="margin-bottom:8px; display:none; font-size:13px;">Copy for records (JSON)</button>
     <button class="btn btn-ghost" id="rawBtn" style="margin-bottom:0; display:none; font-size:13px;">Download raw signal (.csv)</button>
   </div>
 
@@ -820,6 +821,7 @@ function coachingFor(slots) {
     lastResult = res;
     $('copyBtn').style.display = 'block';
     $('rawBtn').style.display = 'block';
+    $('jsonBtn').style.display = 'block';
     const tgt = res.targets;
     repList.innerHTML = '';
     if (!res.reps.length) {
@@ -1217,6 +1219,7 @@ function coachingFor(slots) {
     coachLine.style.display = 'none'; weakSignalNote.style.display = 'none';
     longPauseNote.style.display = 'none'; $('copyBtn').style.display = 'none';
     $('rawBtn').style.display = 'none';
+    $('jsonBtn').style.display = 'none';
     signalText.textContent = 'signal —';
     stopSetBtn.style.display = 'none'; startSetBtn.style.display = 'block';
     startSetBtn.disabled = !sensorsReady;
@@ -1228,6 +1231,17 @@ function coachingFor(slots) {
   // Field trials happen on a phone in a gym, where the only way to get numbers back out is a
   // screenshot — and a screenshot crops exactly the diagnostic figures that matter. Everything
   // needed to explain a set goes on the clipboard as plain text instead.
+  // Clipboard access can be refused outright; falling back to a selectable box means the
+  // numbers are still recoverable by hand rather than lost.
+  function dumpFallback(txt, after) {
+    const ta = document.createElement('textarea');
+    ta.value = txt;
+    ta.style.cssText = 'width:100%;height:200px;margin-top:8px;background:var(--bg);color:var(--ink);'
+      + 'border:1px solid var(--hair);border-radius:10px;font-family:ui-monospace,Menlo,monospace;'
+      + 'font-size:11px;padding:10px;';
+    after.parentNode.insertBefore(ta, after.nextSibling);
+    ta.select();
+  }
   const copyBtn = $('copyBtn');
   copyBtn.addEventListener('click', function() {
     const res = lastResult;
@@ -1297,14 +1311,73 @@ function coachingFor(slots) {
     if (navigator.clipboard && navigator.clipboard.writeText) {
       navigator.clipboard.writeText(text).then(done).catch(function(){ showFallback(text); });
     } else showFallback(text);
-    function showFallback(txt) {
-      // Clipboard access can be refused outright; falling back to a selectable box means the
-      // numbers are still recoverable by hand rather than lost.
-      const ta = document.createElement('textarea');
-      ta.value = txt; ta.style.cssText = 'width:100%;height:160px;margin-top:8px;background:var(--bg);color:var(--ink);border:1px solid var(--hair);border-radius:10px;font-family:ui-monospace,Menlo,monospace;font-size:11px;padding:10px;';
-      copyBtn.parentNode.insertBefore(ta, copyBtn.nextSibling);
-      ta.select();
-    }
+    function showFallback(txt) { dumpFallback(txt, copyBtn); }
+  });
+
+  // A machine-readable record of the set, for the history this feeds into.
+  //
+  // The score travels WITH its confidence, never alone. A set the segmenter could not read
+  // still produces four phase averages and a number out of a hundred, and filed next to a
+  // real one it is indistinguishable — the coach's existing duration history already shows
+  // what that costs, carrying 20s and 180s sets on an identical weight as though both were
+  // measurements. So `trustworthy` is computed here rather than left to whoever consumes
+  // this, and the reasons it failed travel with it.
+  function resultRecord(res) {
+    const s = res.seg, t = res.targets;
+    const slots = phaseSlots(res);
+    const by = n => slots.find(x => x.label === n) || {};
+    const ratio = s.thr > 0 ? s.peak / s.thr : 0;
+    const cS = by('Concentric'), eS = by('Eccentric');
+    const travelMatch = (cS.travel && eS.travel)
+      ? Math.min(cS.travel, eS.travel) / Math.max(cS.travel, eS.travel) : null;
+    const rated = slots.filter(x => x.n);
+    const score = rated.length ? rated.reduce((a, x) => a + x.score, 0) / rated.length : null;
+
+    const fails = [];
+    if (!res.reps.length) fails.push('no reps detected');
+    if (ratio < SIGNAL_MARGINAL) fails.push('signal only ' + ratio.toFixed(1) + 'x threshold');
+    if (res.unreadable) fails.push('phase direction did not resolve');
+    if (travelMatch !== null && travelMatch < 0.8)
+      fails.push('concentric and eccentric travel disagree by '
+        + ((1 - travelMatch) * 100).toFixed(0) + '%');
+    if (res.merged) fails.push(res.merged + ' merged phase(s)');
+
+    const phase = n => { const x = by(n); return x.n ? {
+      meanSeconds: +x.mean.toFixed(2), spreadSeconds: +x.sd.toFixed(2),
+      targetSeconds: x.target, score: Math.round(x.score),
+      travelMm: x.travel ? Math.round(x.travel * 1000) : null, samples: x.n } : null; };
+
+    return {
+      schema: 'rep-scorer/1',
+      recordedAt: new Date().toISOString(),
+      target: { concentric: t.conc, topPause: t.top, eccentric: t.ecc, bottomPause: t.btm },
+      measured: {
+        reps: res.reps.length,
+        timeUnderTensionSeconds: res.tut !== null ? +res.tut.toFixed(1) : null,
+        qualityScore: score !== null ? Math.round(score) : null,
+        weakestPhaseScore: rated.length ? Math.round(Math.min.apply(null, rated.map(x => x.score))) : null,
+        phases: { concentric: phase('Concentric'), topPause: phase('Top pause'),
+                  eccentric: phase('Eccentric'), bottomPause: phase('Btm pause') }
+      },
+      quality: {
+        trustworthy: fails.length === 0,
+        failedChecks: fails,
+        signalRatio: +ratio.toFixed(1),
+        alternationPct: Math.round((s.alternation || 0) * 100),
+        travelMatchPct: travelMatch !== null ? Math.round(travelMatch * 100) : null,
+        sampleRateHz: s.sampleHz ? Math.round(s.sampleHz) : null
+      }
+    };
+  }
+
+  const jsonBtn = $('jsonBtn');
+  jsonBtn.addEventListener('click', function() {
+    if (!lastResult) return;
+    const text = JSON.stringify(resultRecord(lastResult), null, 2);
+    const done = () => { jsonBtn.textContent = 'Copied'; setTimeout(function(){ jsonBtn.textContent = 'Copy for records (JSON)'; }, 1600); };
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      navigator.clipboard.writeText(text).then(done).catch(function(){ dumpFallback(text, jsonBtn); });
+    } else dumpFallback(text, jsonBtn);
   });
 
   // The recording itself, so a trial that went wrong can be replayed through the segmenter
