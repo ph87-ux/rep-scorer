@@ -349,6 +349,31 @@ function segmentSet(samples, opts) {
   shut();
   phases.forEach(p => { p.dur = (p.end - p.start) / 1000; });
 
+  // Discard phases far too brief to be a stroke. A field trial against a 4s target returned
+  // nineteen phases of which thirteen lasted under a second: a sharp twitch kept appearing
+  // just before each real stroke, in the SAME direction, and since same-sign neighbours mark
+  // a boundary every twitch was split off as a phase of its own, wrecking the alternation
+  // that rep pairing depends on. Duration is the right test rather than amplitude, because a
+  // stroke's length is the quantity being measured and is bounded by the tempo the coach
+  // set, whereas peak acceleration legitimately varies severalfold across a fatiguing set.
+  // The reference is the set's OWN strokes, not the target tempo. Scaling it to the target
+  // was tried first and made things worse: that trial was prescribed 4s but actually lifted
+  // at 1.2-3.0s, so a target-derived floor of 1.0s discarded the real strokes along with the
+  // twitches. A client not hitting the target is the normal case — it is the thing being
+  // measured — so the prescription cannot be used to decide what counts as a stroke. A high
+  // quantile of the observed durations resists both a single long merged phase and a crowd
+  // of short fragments.
+  if (phases.length > 2) {
+    const durs = phases.map(p => p.dur).sort((a, b) => a - b);
+    const p75 = durs[Math.min(durs.length - 1, Math.floor(0.75 * durs.length))];
+    const floor = Math.max(0.3, 0.4 * p75);
+    const keptPhases = phases.filter(p => p.dur >= floor);
+    if (keptPhases.length >= 2) {
+      phases.length = 0;
+      Array.prototype.push.apply(phases, keptPhases);
+    }
+  }
+
   // Reps alternate: up, down, up, down. So in a genuine set nearly every neighbouring pair
   // of phases runs in opposite directions, and a set where they mostly do not is not a set
   // of reps that scored badly — it is a recording the segmenter could not read as reps at
