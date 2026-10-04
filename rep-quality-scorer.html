@@ -162,7 +162,7 @@
 
   <header>
     <div>
-      <div class="brand">Prototype · build 04 Oct 06:00 UTC</div>
+      <div class="brand">Prototype · build 04 Oct 06:33 UTC</div>
       <h1>Rep Quality Scorer</h1>
     </div>
     <div class="status-row">
@@ -877,12 +877,25 @@ function coachingFor(slots) {
       }
     }
 
+    // Time under tension: the first rep's start to the last rep's end. This is the number the
+    // coach's existing history already plots against a target band, so measuring it here lets
+    // the two line up — and measured from the accelerometer it does not carry the scatter a
+    // hand-started stopwatch does. It deliberately excludes the stillness before the first rep
+    // and anything after the last, which are setup and walking away, not work.
+    let tut = null;
+    if (res.reps.length) {
+      const first = res.reps[0], last = res.reps[res.reps.length - 1];
+      tut = (last.p2.end - first.p1.start) / 1000;
+    }
+    res.tut = tut;
+
     const rated = slots.filter(s => s.n);
     if (res.reps.length && rated.length) {
       const avg = rated.reduce((a, s) => a + s.score, 0) / rated.length;
       summaryNum.textContent = avg.toFixed(0);
       summaryNum.className = 'num ' + scoreClass(avg);
-      summaryLbl.textContent = res.reps.length + (res.reps.length === 1 ? ' rep' : ' reps') + ' this set';
+      summaryLbl.textContent = res.reps.length + (res.reps.length === 1 ? ' rep' : ' reps') + ' this set'
+        + (tut !== null ? ' · ' + tut.toFixed(0) + 's under tension' : '');
     } else {
       summaryNum.textContent = '—'; summaryNum.className = 'num';
       summaryLbl.textContent = 'no reps detected';
@@ -1234,6 +1247,8 @@ function coachingFor(slots) {
         + 'x threshold — needs 3x to be trustworthy)',
       'samples     : ' + samples.length + '  (' + rate.toFixed(0) + ' Hz over ' + elapsed.toFixed(1) + 's)',
       'reps shown  : ' + res.reps.length,
+      'time under tension: ' + (res.tut !== null ? res.tut.toFixed(1) + 's' : '-')
+        + '   (first rep start to last rep end)',
       'alternation : ' + (s.alternation * 100).toFixed(0) + '%  (reps alternate direction; under 50% means unreadable)',
       'smoothing   : ' + (s.cutoffHz ? s.cutoffHz.toFixed(2) + ' Hz cutoff, chosen from this set' : 'n/a'),
       ''
