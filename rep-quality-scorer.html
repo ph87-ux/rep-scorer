@@ -162,7 +162,7 @@
 
   <header>
     <div>
-      <div class="brand">Prototype · build 04 Oct 05:44 UTC</div>
+      <div class="brand">Prototype · build 04 Oct 05:47 UTC</div>
       <h1>Rep Quality Scorer</h1>
     </div>
     <div class="status-row">
@@ -671,6 +671,11 @@ function coachingFor(slots) {
   let wakeLock = null;
   const SETTLE_MS = 2500;   // stillness the analysis needs before the first rep
 
+  // Flip to true when the rig is proven and this goes in front of clients. It is the only
+  // line that needs changing: false gives the testing cues UP / HOLD / DOWN, true gives the
+  // client cues MOVE / PAUSE.
+  const CLIENT_FACING = false;
+
   // A 10-rep set at a 4s tempo is two minutes with nobody touching the screen, so iOS
   // auto-lock fires partway through and the motion events simply stop — the set comes back
   // truncated with nothing to say why. The screen is held awake for the duration instead.
@@ -1001,13 +1006,20 @@ function coachingFor(slots) {
   let ringStart = 0;
   function ringSegments(tgt) {
     // A zero-length pause is simply left out rather than flashed through.
-    // MOVE and PAUSE rather than UP and DOWN. The bubble's size already says which way the
-    // stack is going, and the client's own direction need not match it — on a pulldown they
-    // pull down while the stack rises, so "UP" would have been wrong from where they sit.
-    const segs = [{ cue: 'MOVE', dur: tgt.conc, pause: false, from: 0, to: 1 }];
-    if (tgt.top > 0) segs.push({ cue: 'PAUSE', dur: tgt.top, pause: true, from: 1, to: 1 });
-    segs.push({ cue: 'MOVE', dur: tgt.ecc, pause: false, from: 1, to: 0 });
-    if (tgt.btm > 0) segs.push({ cue: 'PAUSE', dur: tgt.btm, pause: true, from: 0, to: 0 });
+    // Two cue sets, chosen by CLIENT_FACING above.
+    //
+    // While testing, UP and DOWN earn their place: they say which phase the ring believes it
+    // is in, so a direction fault shows up on the screen instead of only in the numbers
+    // afterwards. That is worth more right now than the wording being right for a client.
+    //
+    // For a client, MOVE and PAUSE: the bubble's size already says which way the stack is
+    // going, and the client's own direction need not match it — on a pulldown they pull down
+    // while the stack rises, so UP would be wrong from where they sit.
+    const c = CLIENT_FACING;
+    const segs = [{ cue: c ? 'MOVE' : 'UP', dur: tgt.conc, pause: false, from: 0, to: 1 }];
+    if (tgt.top > 0) segs.push({ cue: c ? 'PAUSE' : 'HOLD', dur: tgt.top, pause: true, from: 1, to: 1 });
+    segs.push({ cue: c ? 'MOVE' : 'DOWN', dur: tgt.ecc, pause: false, from: 1, to: 0 });
+    if (tgt.btm > 0) segs.push({ cue: c ? 'PAUSE' : 'HOLD', dur: tgt.btm, pause: true, from: 0, to: 0 });
     return segs;
   }
   const R_MAX = 104, R_MIN = 20;
