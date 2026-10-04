@@ -338,8 +338,16 @@ function segmentSet(samples, opts) {
   // strength. Note this bounds the slide rather than stopping it — amplitude alone cannot
   // separate a fatiguing set, whose peaks genuinely fall severalfold, from a noisy one. The
   // alternation check below is what actually catches that.
+  // A stack clang is brief and enormous — tens of times any real stroke. Left alone it
+  // becomes the reference and every genuine stroke after it is rejected as too weak, which
+  // cost half of a simulated set. The reference is therefore capped at a robust set-level
+  // statistic, so no single outlier can raise the bar. The cap only ever LOWERS the
+  // reference, so it cannot make the gate stricter on a set whose peaks fall with fatigue.
+  const keptPeaks = kept.map(L => L.peak).sort((x, y) => x - y);
+  const medPeak = keptPeaks.length ? keptPeaks[keptPeaks.length >> 1] : 0;
+  const refCap = medPeak ? medPeak * 2 : Infinity;
   let lastPhasePeak = 0, groupPeak = 0;
-  const refNow = () => Math.max(lastPhasePeak, groupPeak);
+  const refNow = () => Math.min(Math.max(lastPhasePeak, groupPeak), refCap);
   const shut = () => { if (group.length) { lastPhasePeak = Math.max.apply(null, group.map(L => L.peak)); } closeGroup(); groupPeak = 0; };
   for (const L of kept) {
     const ref = refNow();
