@@ -93,6 +93,12 @@
   body.set-running .set-hide { display:none; }
   body.set-running #tempoPanel { margin-top:4px; }
   body.set-running .ring-wrap { max-width:300px; }
+  body.ring-off #ringSvg { opacity:.18; }
+
+  .ring-toggle { display:flex; align-items:flex-start; gap:10px; cursor:pointer; }
+  .ring-toggle input { width:20px; height:20px; accent-color:var(--accent); margin:1px 0 0; flex:none; }
+  .ring-toggle b { font-size:13px; font-weight:600; display:block; }
+  .ring-toggle-sub { display:block; font-size:11px; color:var(--dim); line-height:1.4; margin-top:3px; }
 
   .summary-score { text-align:center; padding:6px 0 4px; }
   .summary-score .num { font-family:var(--mono); font-size:48px; font-weight:700; line-height:1; }
@@ -153,9 +159,7 @@
   </header>
 
   <button class="btn btn-primary" id="permitBtn">Enable Motion Access</button>
-  <div class="set-hide" style="font-size:11px;color:var(--dim);text-align:center;margin:-4px 0 12px;line-height:1.4;">
-    Enable motion to record and score a set. Without it the tempo ring still runs, so this page
-    can be used purely as a pacer on a coach's own phone.</div>
+
   <div class="err" id="errBox"></div>
 
   <div class="panel set-hide">
@@ -169,14 +173,25 @@
     </div>
   </div>
 
-  <button class="btn btn-primary" id="startSetBtn">Start Set</button>
+  <div class="panel set-hide" style="padding:12px 14px;">
+    <label class="ring-toggle">
+      <input type="checkbox" id="ringToggle" checked>
+      <span>
+        <b>Show tempo ring</b>
+        <span class="ring-toggle-sub">Turn off where the client cannot see the screen — the set is
+        still recorded and scored either way.</span>
+      </span>
+    </label>
+  </div>
+
+  <button class="btn btn-primary" id="startSetBtn" disabled>Start Set</button>
   <button class="btn btn-stop" id="stopSetBtn" style="display:none">Stop Set</button>
   <button class="btn btn-ghost set-hide" id="resetBtn">Reset</button>
 
   <div class="panel" id="tempoPanel">
-    <div class="panel-title">Tempo</div>
+    <div class="panel-title" id="tempoPanelTitle">Tempo</div>
     <div class="ring-wrap">
-      <svg class="ring" viewBox="0 0 240 240" aria-hidden="true">
+      <svg class="ring" id="ringSvg" viewBox="0 0 240 240" aria-hidden="true">
         <circle class="ring-track" cx="120" cy="120" r="104"></circle>
         <circle class="ring-arc" id="ringArc" cx="120" cy="120" r="104"></circle>
       </svg>
@@ -626,6 +641,17 @@ function coachingFor(slots) {
   const SIGNAL_MARGINAL = 2.8, SIGNAL_UNUSABLE = 2.0;
   const trendCanvas = $('trendCanvas'), trendCtx = trendCanvas.getContext('2d');
   const ringArc = $('ringArc'), ringCue = $('ringCue'), ringCount = $('ringCount'), ringRep = $('ringRep');
+  const ringToggle = $('ringToggle');
+  // Whether the ring is wanted is a property of the machine — some put the phone where the
+  // client can read it, some don't — so the choice is remembered rather than re-asked every
+  // set. Wrapped because storage can be unavailable or throw in a private window.
+  try {
+    const saved = localStorage.getItem('repscorer.ring');
+    if (saved !== null) ringToggle.checked = saved === '1';
+  } catch (e) {}
+  ringToggle.addEventListener('change', function() {
+    try { localStorage.setItem('repscorer.ring', ringToggle.checked ? '1' : '0'); } catch (e) {}
+  });
 
   let sensorsReady = false, recording = false;
   let samples = [], setStartT = 0, liveMax = 0, lastResult = null;
@@ -996,6 +1022,16 @@ function coachingFor(slots) {
 
   function tick() {
     if (!recording) return;
+    if (!ringToggle.checked) {
+      // No ring on this machine: just enough to show the set is running and being captured.
+      ringCue.textContent = 'RECORDING'; ringCue.className = 'ring-cue cue-move';
+      ringCount.textContent = ((performance.now() - setStartT) / 1000).toFixed(0);
+      ringCount.className = 'ring-count cue-idle';
+      ringRep.textContent = samples.length + ' SAMPLES';
+      ringArc.style.strokeDashoffset = String(RING_CIRC);
+      requestAnimationFrame(tick);
+      return;
+    }
     const sinceStart = performance.now() - ringStart;
     if (sinceStart < 0) {
       ringArc.style.strokeDashoffset = String(RING_CIRC);
@@ -1052,10 +1088,10 @@ function coachingFor(slots) {
   });
 
   startSetBtn.addEventListener('click', function() {
-    // The ring paces from the clock alone, so it works with no sensor at all. That is what
-    // lets a coach run the tempo on their own phone while each client's phone only records —
-    // the two never need to talk to each other, and on a busy floor the ring is then always
-    // in the coach's hand rather than clamped to a stack at knee height.
+    // Everything runs on the client's own phone, so a set that is not recording is a wasted
+    // set. Start stays locked until motion access is granted rather than letting someone
+    // lift a full set and find afterwards that nothing was captured.
+    if (!sensorsReady) return;
     samples = []; liveMax = 0; lastResult = null;
     setStartT = performance.now(); recording = true;
     // The analysis needs a second or two of stillness to measure gravity and the noise floor,
@@ -1066,10 +1102,11 @@ function coachingFor(slots) {
     $('phaseAverages').innerHTML = '';
     coachLine.style.display = 'none'; weakSignalNote.style.display = 'none';
     longPauseNote.style.display = 'none';
-    statusText.textContent = sensorsReady ? 'recording' : 'pacing only';
-    signalText.textContent = sensorsReady ? 'signal —' : 'no sensor';
+    statusText.textContent = 'recording'; signalText.textContent = 'signal —';
     startSetBtn.style.display = 'none'; stopSetBtn.style.display = 'block';
     document.body.classList.add('set-running');
+    document.body.classList.toggle('ring-off', !ringToggle.checked);
+    $('tempoPanelTitle').textContent = ringToggle.checked ? 'Tempo' : 'Recording';
     errBox.style.display = 'none';
     holdScreenAwake();
     drawTrend(null);
@@ -1086,15 +1123,7 @@ function coachingFor(slots) {
     tempoFill.style.width = '0%'; tempoFill.className = 'tempo-fill';
     stopSetBtn.style.display = 'none'; startSetBtn.style.display = 'block';
     resetRing('DONE');
-    // Nothing was recorded, so there is nothing to analyse and no results to invent.
-    if (!sensorsReady || !samples.length) {
-      repList.innerHTML = '<div class="empty-note">Pacing only — motion access was not enabled, '
-        + 'so this set was not recorded.</div>';
-      summaryNum.textContent = '—'; summaryNum.className = 'num';
-      summaryLbl.textContent = 'not recorded';
-      $('phaseAverages').innerHTML = '';
-      return;
-    }
+    $('tempoPanelTitle').textContent = 'Tempo';
     analyse();
   });
 
@@ -1112,6 +1141,7 @@ function coachingFor(slots) {
     $('rawBtn').style.display = 'none';
     signalText.textContent = 'signal —';
     stopSetBtn.style.display = 'none'; startSetBtn.style.display = 'block';
+    startSetBtn.disabled = !sensorsReady;
     statusText.textContent = sensorsReady ? 'ready' : 'idle';
     resetRing();
     drawTrend(null);
