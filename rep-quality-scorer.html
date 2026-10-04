@@ -82,7 +82,15 @@
   .sub-score { display:flex; justify-content:space-between; font-size:11px; }
   .sub-score .k { color:var(--dim); font-family:var(--mono); }
   .sub-score .v { font-family:var(--mono); font-weight:600; }
-  .phase-times { display:grid; grid-template-columns:repeat(4,1fr); gap:6px; margin:4px 0 10px; }
+  .phase-times { display:grid; grid-template-columns:repeat(4,1fr); gap:6px; margin:4px 0 0; }
+  /* Set-level averages: one row per movement phase, the unit a coach actually cues. */
+  .pa-row { display:grid; grid-template-columns:1fr auto auto; align-items:baseline; gap:10px;
+    padding:9px 10px; background:var(--bg-deep); border:1px solid var(--line);
+    border-radius:8px; margin-bottom:6px; }
+  .pa-name { font-size:12px; }
+  .pa-sub { display:block; font-family:var(--mono); font-size:9px; color:var(--dim); margin-top:2px; }
+  .pa-time { font-family:var(--mono); font-size:15px; font-weight:700; }
+  .pa-score { font-family:var(--mono); font-size:17px; font-weight:700; min-width:34px; text-align:right; }
   .pt { background:rgba(255,255,255,.04); border-radius:6px; padding:6px 2px; text-align:center; }
   .ptk { display:block; font-family:var(--mono); font-size:8px; letter-spacing:.06em;
     text-transform:uppercase; color:var(--dim); }
@@ -125,12 +133,12 @@
 
   <div class="panel">
     <div class="panel-title">Target Tempo (seconds)</div>
-    <div style="font-size:11px;color:var(--dim);margin:-4px 0 10px;line-height:1.4;">Phases lose marks only for being <b>rushed</b> — slower than target costs nothing. Pauses are judged both ways, with 20% either side free.</div>
+    <div style="font-size:11px;color:var(--dim);margin:-4px 0 10px;line-height:1.4;">Concentric raises the stack, eccentric lowers it — told apart by direction, not by which came first. Phases lose marks only for being <b>rushed</b>; slower than target costs nothing. Pauses are judged both ways, 20% either side free.</div>
     <div class="tempo-grid">
-      <div class="tempo-field"><label>Phase 1</label><input type="number" id="t1" value="4" step="0.5" min="0.5"></div>
-      <div class="tempo-field"><label>Pause 1</label><input type="number" id="p1" value="2" step="0.5" min="0"></div>
-      <div class="tempo-field"><label>Phase 2</label><input type="number" id="t2" value="4" step="0.5" min="0.5"></div>
-      <div class="tempo-field"><label>Pause 2</label><input type="number" id="p2" value="2" step="0.5" min="0"></div>
+      <div class="tempo-field"><label>Concentric</label><input type="number" id="t1" value="4" step="0.5" min="0.5"></div>
+      <div class="tempo-field"><label>Top pause</label><input type="number" id="p1" value="2" step="0.5" min="0"></div>
+      <div class="tempo-field"><label>Eccentric</label><input type="number" id="t2" value="4" step="0.5" min="0.5"></div>
+      <div class="tempo-field"><label>Btm pause</label><input type="number" id="p2" value="2" step="0.5" min="0"></div>
     </div>
   </div>
 
@@ -178,9 +186,7 @@
       <div class="lbl" id="summaryLbl">no reps yet</div>
       <div style="font-size:10px;color:var(--dim);margin-top:4px;font-family:var(--mono);">how close the set held the target tempo</div>
     </div>
-    <div class="sub-scores" style="margin-top:10px; grid-template-columns:1fr;">
-      <div class="sub-score"><span class="k">weakest rep</span><span class="v" id="summaryTempo">—</span></div>
-    </div>
+    <div id="phaseAverages"></div>
     <div class="coach-line" id="coachLine" style="display:none;"></div>
     <div class="warn-note" id="longPauseNote"></div>
   </div>
@@ -421,7 +427,19 @@ function scoreSet(seg, tgt) {
     // mathematically perfect rep and a deliberately juddering one scored within a few points
     // of each other. A number that cannot tell those apart is not worth a coach's attention.
     const tempoScore = parts.reduce((a, b) => a + b, 0) / parts.length;
-    return Object.assign({}, r, { tempoScore, composite: tempoScore });
+    // Name the four slots by DIRECTION rather than by order. On a selectorised stack the
+    // working stroke always raises the weight, so an upward phase is the concentric wherever
+    // it falls in the recording, and the pause that follows it is the one at the top. Keying
+    // off "whichever came first" would silently swap every label on a set that happened to
+    // begin with a lowering.
+    const upFirst = r.p1.dir > 0;
+    return Object.assign({}, r, { tempoScore, composite: tempoScore,
+      concentric:  upFirst ? r.phase1Duration : r.phase2Duration,
+      eccentric:   upFirst ? r.phase2Duration : r.phase1Duration,
+      topPause:    upFirst ? r.pause1Duration : r.pause2Duration,
+      bottomPause: upFirst ? r.pause2Duration : r.pause1Duration,
+      topUnresolved:    upFirst ? r.pause1Unresolved : r.pause2Unresolved,
+      bottomUnresolved: upFirst ? r.pause2Unresolved : r.pause1Unresolved });
   });
 }
 
@@ -431,23 +449,13 @@ function scoreSet(seg, tgt) {
 // sits furthest from its target. Those differ now that slow phases are free — judged on raw
 // distance a 7s phase against a 4s target would be named as the headline fault while scoring
 // a perfect 100, and the advice would contradict the number beside it.
-function coachingFor(reps, tgt) {
-  if (!reps.length) return null;
-  const defs = [
-    { key: 'phase1Duration', label: 'Phase 1', target: tgt.p1, pause: false },
-    { key: 'pause1Duration', label: 'Pause 1', target: tgt.q1, pause: true },
-    { key: 'phase2Duration', label: 'Phase 2', target: tgt.p2, pause: false },
-    { key: 'pause2Duration', label: 'Pause 2', target: tgt.q2, pause: true }
-  ];
-  let worst = null;
-  for (const d of defs) {
-    const vals = reps.map(r => r[d.key]).filter(v => v !== null && v !== undefined);
-    if (!vals.length) continue;
-    const mean = vals.reduce((a, b) => a + b, 0) / vals.length;
-    const score = d.pause ? scorePause(mean, d.target, tgt.tol) : scorePhase(mean, d.target, tgt.tol);
-    if (!worst || score < worst.score) worst = { label: d.label, mean, target: d.target, score, pause: d.pause };
-  }
-  if (!worst) return null;
+// The one thing to work on next time: whichever movement phase scores worst across the set.
+// Driven by the same slots the summary shows, so the advice can never name something the
+// numbers above it call fine.
+function coachingFor(slots) {
+  const rated = slots.filter(s => s.n);
+  if (!rated.length) return null;
+  const worst = rated.reduce((a, s) => (s.score < a.score ? s : a), rated[0]);
   if (worst.score >= 90) {
     return { good: true, text: 'Tempo on point — nothing in this set is costing marks' };
   }
@@ -455,8 +463,8 @@ function coachingFor(reps, tgt) {
   const how = worst.pause
     ? (diff > 0 ? 'held ' + diff.toFixed(1) + 's too long' : 'cut ' + Math.abs(diff).toFixed(1) + 's short')
     : 'rushed by ' + Math.abs(diff).toFixed(1) + 's';
-  return { good: false, text: 'Work on: ' + worst.label + ' — averaged ' + worst.mean.toFixed(1)
-    + 's against a ' + worst.target.toFixed(1) + 's target, ' + how };
+  return { good: false, text: 'Work on: ' + worst.label.toLowerCase() + ' — averaged '
+    + worst.mean.toFixed(1) + 's against a ' + worst.target.toFixed(1) + 's target, ' + how };
 }
 
 // --- UI ---------------------------------------------------------------------
@@ -509,6 +517,8 @@ function coachingFor(reps, tgt) {
     return {
       p1: parseFloat($('t1').value) || 4, q1: parseFloat($('p1').value) || 2,
       p2: parseFloat($('t2').value) || 4, q2: parseFloat($('p2').value) || 2,
+      conc: parseFloat($('t1').value) || 4, top: parseFloat($('p1').value) || 2,
+      ecc: parseFloat($('t2').value) || 4, btm: parseFloat($('p2').value) || 2,
       tol: 0.6, minPause: parseFloat($('minPauseIn').value) || 0.6
     };
   }
@@ -569,6 +579,29 @@ function coachingFor(reps, tgt) {
     trendCtx.fillText(res.reps.length + (res.reps.length === 1 ? ' rep' : ' reps'), w - 44, 10);
   }
 
+  // One entry per movement phase, averaged across the set. A pause the segmenter could not
+  // resolve is left out of its average rather than dragging it down with a figure that was
+  // never a measurement, and the last rep's missing bottom pause simply contributes nothing.
+  function phaseSlots(res) {
+    const t = res.targets;
+    const defs = [
+      { label: 'Concentric', sub: 'stack rising',  key: 'concentric',  target: t.conc, pause: false },
+      { label: 'Top pause',  sub: 'stack at top',  key: 'topPause',    target: t.top,  pause: true, flag: 'topUnresolved' },
+      { label: 'Eccentric',  sub: 'stack lowering',key: 'eccentric',   target: t.ecc,  pause: false },
+      { label: 'Btm pause',  sub: 'stack at base', key: 'bottomPause', target: t.btm,  pause: true, flag: 'bottomUnresolved' }
+    ];
+    return defs.map(d => {
+      const vals = res.reps
+        .filter(r => r[d.key] !== null && r[d.key] !== undefined && !(d.flag && r[d.flag]))
+        .map(r => r[d.key]);
+      if (!vals.length) return Object.assign({}, d, { n: 0 });
+      const mean = vals.reduce((a, b) => a + b, 0) / vals.length;
+      const sd = Math.sqrt(vals.reduce((a, v) => a + (v - mean) * (v - mean), 0) / vals.length);
+      const score = d.pause ? scorePause(mean, d.target, t.tol) : scorePhase(mean, d.target, t.tol);
+      return Object.assign({}, d, { n: vals.length, mean, sd, score });
+    });
+  }
+
   function cell(label, val, target, tol, unresolved, isPause) {
     if (val === null || val === undefined) return '<div class="pt"><span class="ptk">' + label + '</span><span class="ptv">—</span></div>';
     // Shown in full, but marked: the stroke boundaries either side of a pause this short are
@@ -592,29 +625,43 @@ function coachingFor(reps, tgt) {
         const d = document.createElement('div');
         d.className = 'rep-card';
         d.innerHTML =
-          '<div class="rep-card-top"><div class="rep-num">REP ' + (i + 1) + '</div>' +
-          '<div class="rep-composite ' + scoreClass(r.composite) + '">' + r.composite.toFixed(0) + '</div></div>' +
+          '<div class="rep-card-top"><div class="rep-num">REP ' + (i + 1) + '</div></div>' +
           '<div class="phase-times">' +
-            cell('P1', r.phase1Duration, tgt.p1, tgt.tol) +
-            cell('pause', r.pause1Duration, tgt.q1, tgt.minPause, r.pause1Unresolved, true) +
-            cell('P2', r.phase2Duration, tgt.p2, tgt.tol) +
-            cell('pause', r.pause2Duration, tgt.q2, tgt.minPause, r.pause2Unresolved, true) +
+            cell('CONC', r.concentric, tgt.conc, tgt.tol) +
+            cell('TOP', r.topPause, tgt.top, tgt.minPause, r.topUnresolved, true) +
+            cell('ECC', r.eccentric, tgt.ecc, tgt.tol) +
+            cell('BTM', r.bottomPause, tgt.btm, tgt.minPause, r.bottomUnresolved, true) +
           '</div>';
         repList.appendChild(d);
       });
     }
 
-    if (res.reps.length) {
-      const avg = res.reps.reduce((a, r) => a + r.composite, 0) / res.reps.length;
+    // The set is summarised by movement phase, not by rep. "Your eccentric is rushed" is a cue
+    // a coach can give; "rep 3 scored 62" is not, because it does not say what to change. Each
+    // row also carries the spread across the set, which is the consistency the score cannot
+    // show: four reps at 4s and four alternating 2s/6s can average identically.
+    const pa = $('phaseAverages');
+    const slots = phaseSlots(res);
+    pa.innerHTML = slots.map(s => {
+      if (!s.n) return '<div class="pa-row"><span class="pa-name">' + s.label
+        + '<span class="pa-sub">' + s.sub + '</span></span><span class="pa-time">—</span><span class="pa-score">—</span></div>';
+      return '<div class="pa-row"><span class="pa-name">' + s.label
+        + '<span class="pa-sub">' + s.sub + ' · target ' + s.target.toFixed(1) + 's'
+        + (s.n > 1 ? ' · spread ±' + s.sd.toFixed(1) + 's' : '') + '</span></span>'
+        + '<span class="pa-time">' + s.mean.toFixed(1) + 's</span>'
+        + '<span class="pa-score ' + scoreClass(s.score) + '">' + s.score.toFixed(0) + '</span></div>';
+    }).join('');
+
+    const rated = slots.filter(s => s.n);
+    if (res.reps.length && rated.length) {
+      const avg = rated.reduce((a, s) => a + s.score, 0) / rated.length;
       summaryNum.textContent = avg.toFixed(0);
       summaryNum.className = 'num ' + scoreClass(avg);
       summaryLbl.textContent = res.reps.length + (res.reps.length === 1 ? ' rep' : ' reps') + ' this set';
-      const worst = res.reps.reduce((a, r) => Math.min(a, r.composite), 100);
-      $('summaryTempo').textContent = worst.toFixed(0); $('summaryTempo').className = 'v ' + scoreClass(worst);
     } else {
       summaryNum.textContent = '—'; summaryNum.className = 'num';
       summaryLbl.textContent = 'no reps detected';
-      $('summaryTempo').textContent = '—';
+      pa.innerHTML = '';
     }
 
     // A pause well past target is the fault a client cannot feel happening, so it gets a
@@ -635,7 +682,7 @@ function coachingFor(reps, tgt) {
       flashOverlay.classList.add('on');
     } else longPauseNote.style.display = 'none';
 
-    const coach = coachingFor(res.reps, tgt);
+    const coach = coachingFor(slots);
     if (coach) {
       coachLine.style.display = 'block';
       coachLine.className = 'coach-line ' + (coach.good ? 'score-good' : 'score-bad');
@@ -718,15 +765,16 @@ function coachingFor(reps, tgt) {
     // same-direction phases happening to sit next to one odd one. Reporting a score for that
     // is worse than reporting nothing, because it looks like a measurement.
     const unreadable = seg.phases.length > 2 && seg.alternation < 0.5;
+    // Flag unresolvable pauses BEFORE scoring, so the direction-keyed labels below inherit
+    // the right flag with the right pause.
+    seg.reps.forEach(r => {
+      r.pause1Unresolved = r.pause1Duration !== null && r.pause1Duration < minPause;
+      r.pause2Unresolved = r.pause2Duration !== null && r.pause2Duration < minPause;
+    });
     const all = unreadable ? [] : scoreSet(seg, tgt);
     const scored = all.filter(r => r.p1.dur <= runLimit && r.p2.dur <= runLimit);
     let unresolved = 0;
-    scored.forEach(r => {
-      r.pause1Unresolved = r.pause1Duration !== null && r.pause1Duration < minPause;
-      r.pause2Unresolved = r.pause2Duration !== null && r.pause2Duration < minPause;
-      if (r.pause1Unresolved) unresolved++;
-      if (r.pause2Unresolved) unresolved++;
-    });
+    scored.forEach(r => { if (r.pause1Unresolved) unresolved++; if (r.pause2Unresolved) unresolved++; });
     render({ seg, reps: scored, targets: tgt, merged: merged, runLimit: runLimit,
              minPause: minPause, dropped: all.length - scored.length, unresolved: unresolved,
              unreadable: unreadable });
@@ -786,7 +834,7 @@ function coachingFor(reps, tgt) {
     setStartT = performance.now(); recording = true;
     repList.innerHTML = '<div class="empty-note">Recording… press Stop when the set is done.</div>';
     summaryNum.textContent = '—'; summaryLbl.textContent = 'recording';
-    $('summaryTempo').textContent = '—';
+    $('phaseAverages').innerHTML = '';
     coachLine.style.display = 'none'; weakSignalNote.style.display = 'none';
     longPauseNote.style.display = 'none';
     statusText.textContent = 'recording'; signalText.textContent = 'signal —';
@@ -814,7 +862,7 @@ function coachingFor(reps, tgt) {
     phaseTime.textContent = '—'; tempoFill.style.width = '0%'; tempoFill.className = 'tempo-fill';
     repList.innerHTML = '<div class="empty-note">Press Stop when the set is done — reps and phase times appear here.</div>';
     summaryNum.textContent = '—'; summaryNum.className = 'num'; summaryLbl.textContent = 'no reps yet';
-    $('summaryTempo').textContent = '—';
+    $('phaseAverages').innerHTML = '';
     $('dbgNoise').textContent = '—'; $('dbgGRef').textContent = 'g —';
     $('dbgThresh').textContent = '—'; $('dbgAPeak').textContent = '—';
     coachLine.style.display = 'none'; weakSignalNote.style.display = 'none';
@@ -862,16 +910,23 @@ function coachingFor(reps, tgt) {
         + 's  lasting ' + ph.dur.toFixed(2) + 's  peak ' + ph.peak.toFixed(3) + '  then gap ' + gap);
     });
     lines.push('');
+    lines.push('set averages by phase:');
+    phaseSlots(res).forEach(function(s) {
+      lines.push('  ' + s.label.padEnd(11) + (s.n
+        ? (s.mean.toFixed(1) + 's').padStart(6) + '  vs target ' + s.target.toFixed(1) + 's'
+          + '   spread +/-' + s.sd.toFixed(1) + 's   score ' + s.score.toFixed(0) + '   (n=' + s.n + ')'
+        : '   -    no measurable value this set'));
+    });
+    lines.push('');
     res.reps.forEach(function(r, i) {
       const f = v => (v === null || v === undefined) ? '  -  ' : (v.toFixed(1) + 's').padStart(5);
       // An unresolved pause is flagged here too, so a pasted result cannot be read as if the
       // figure were a measurement.
       const q = (v, bad) => f(v) + (bad ? '!' : ' ');
-      lines.push('rep ' + (i + 1) + ':  P1 ' + f(r.phase1Duration) + '   pause ' + q(r.pause1Duration, r.pause1Unresolved)
-        + '  P2 ' + f(r.phase2Duration) + '   pause ' + q(r.pause2Duration, r.pause2Unresolved)
-        + '  score ' + r.composite.toFixed(0));
+      lines.push('rep ' + (i + 1) + ':  conc ' + f(r.concentric) + '   top ' + q(r.topPause, r.topUnresolved)
+        + '  ecc ' + f(r.eccentric) + '   btm ' + q(r.bottomPause, r.bottomUnresolved));
     });
-    if (res.reps.some(r => r.pause1Unresolved || r.pause2Unresolved))
+    if (res.reps.some(r => r.topUnresolved || r.bottomUnresolved))
       lines.push('', '( ! = pause below the resolution floor, not a measurement )');
     if (weakSignalNote.style.display === 'block') lines.push('', 'WARNING: ' + weakSignalNote.textContent);
     if (longPauseNote.style.display === 'block') lines.push('', 'NOTE: ' + longPauseNote.textContent);
