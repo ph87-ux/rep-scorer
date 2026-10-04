@@ -65,20 +65,22 @@
      through the eccentric and holds at the bottom. Size therefore maps directly onto where
      the weight is, which a sweeping arc never did. The outline is the diameter it is growing
      into, so "am I on pace" is a gap the client can see closing rather than a number. */
-  .ring-wrap { position:relative; width:100%; max-width:300px; margin:2px auto 4px; aspect-ratio:1; }
+  .ring-wrap { position:relative; width:100%; max-width:264px; margin:2px auto 2px; aspect-ratio:1; }
   .ring { width:100%; height:100%; display:block; overflow:visible; }
   .ring-target { fill:none; stroke:#DCDCE2; stroke-width:2; stroke-dasharray:5 7; }
   .ring-bubble { fill:var(--blue); }
   .ring-bubble.pause { fill:var(--warn); }
-  .ring-centre { position:absolute; inset:0; display:flex; flex-direction:column;
-    align-items:center; justify-content:center; text-align:center; pointer-events:none; }
-  .ring-cue { font-size:34px; font-weight:800; letter-spacing:.01em; line-height:1.1; color:#FFFFFF;
-    text-shadow:0 1px 10px rgba(0,0,0,.28); }
-  .ring-cue.cue-idle { color:var(--dim); text-shadow:none; }
+  /* The cue sits BELOW the bubble, not inside it. In the bubble it had to be white to read
+     against the fill, and at the bottom of the eccentric the bubble is at its smallest while
+     the word is at its longest — "PAUSE" spilled onto the white card and vanished. Outside,
+     it is legible at every size and can carry the phase colour itself. */
+  .ring-cue { font-size:32px; font-weight:800; letter-spacing:.01em; line-height:1.1;
+    text-align:center; margin-top:2px; }
   .ring-count { display:none; }
   .ring-rep { font-size:14px; color:var(--dim); letter-spacing:.04em; font-weight:600;
-    text-align:center; margin-bottom:6px; }
-  .cue-move, .cue-hold { color:#FFFFFF; }
+    text-align:center; margin:4px 0 6px; }
+  .cue-move { color:var(--blue); }
+  .cue-hold { color:var(--warn); }
 
   .phase-big { text-align:center; font-size:22px; font-weight:700; margin:4px 0 2px; }
   .phase-time { text-align:center; font-size:13px; color:var(--dim); margin-bottom:10px; font-weight:500; }
@@ -89,7 +91,7 @@
 
   body.set-running .set-hide { display:none; }
   body.set-running #tempoPanel { margin-top:2px; }
-  body.set-running .ring-wrap { max-width:320px; }
+  body.set-running .ring-wrap { max-width:290px; }
   body.ring-off #ringSvg { opacity:.14; }
 
   .ring-toggle { display:flex; align-items:flex-start; gap:12px; cursor:pointer; }
@@ -205,11 +207,9 @@
         <circle class="ring-target" cx="120" cy="120" r="108"></circle>
         <circle class="ring-bubble" id="ringArc" cx="120" cy="120" r="20"></circle>
       </svg>
-      <div class="ring-centre">
-        <div class="ring-cue" id="ringCue">READY</div>
-        <div class="ring-count" id="ringCount">—</div>
-      </div>
+      <div class="ring-count" id="ringCount">—</div>
     </div>
+    <div class="ring-cue" id="ringCue">READY</div>
     <div class="ring-rep" id="ringRep">press start</div>
     <div class="phase-big phase-idle" id="phaseBig" style="display:none">IDLE</div>
     <div class="phase-time" id="phaseTime">—</div>
@@ -1000,10 +1000,13 @@ function coachingFor(slots) {
   let ringStart = 0;
   function ringSegments(tgt) {
     // A zero-length pause is simply left out rather than flashed through.
-    const segs = [{ cue: 'UP', dur: tgt.conc, pause: false, from: 0, to: 1 }];
-    if (tgt.top > 0) segs.push({ cue: 'HOLD', dur: tgt.top, pause: true, from: 1, to: 1 });
-    segs.push({ cue: 'DOWN', dur: tgt.ecc, pause: false, from: 1, to: 0 });
-    if (tgt.btm > 0) segs.push({ cue: 'HOLD', dur: tgt.btm, pause: true, from: 0, to: 0 });
+    // MOVE and PAUSE rather than UP and DOWN. The bubble's size already says which way the
+    // stack is going, and the client's own direction need not match it — on a pulldown they
+    // pull down while the stack rises, so "UP" would have been wrong from where they sit.
+    const segs = [{ cue: 'MOVE', dur: tgt.conc, pause: false, from: 0, to: 1 }];
+    if (tgt.top > 0) segs.push({ cue: 'PAUSE', dur: tgt.top, pause: true, from: 1, to: 1 });
+    segs.push({ cue: 'MOVE', dur: tgt.ecc, pause: false, from: 1, to: 0 });
+    if (tgt.btm > 0) segs.push({ cue: 'PAUSE', dur: tgt.btm, pause: true, from: 0, to: 0 });
     return segs;
   }
   const R_MAX = 104, R_MIN = 20;
