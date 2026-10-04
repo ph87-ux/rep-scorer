@@ -70,6 +70,30 @@
   .tempo-fill.over { background:var(--bad); }
   .tempo-fill.pause { background:var(--warn); }
 
+  /* The client's pacing ring. Prescriptive, not reactive: it counts out the target tempo and
+     owes nothing to the sensor, so it cannot be thrown by a reading the way a live readout
+     would be. Sized to be read at arm's length from a stack-mounted phone. */
+  .ring-wrap { position:relative; width:100%; max-width:260px; margin:4px auto 10px; aspect-ratio:1; }
+  .ring { width:100%; height:100%; transform:rotate(-90deg); display:block; }
+  .ring-track { fill:none; stroke:var(--bg-deep); stroke-width:16; }
+  .ring-arc { fill:none; stroke:var(--accent); stroke-width:16; stroke-linecap:round;
+    stroke-dasharray:653.45; stroke-dashoffset:653.45; }
+  .ring-arc.pause { stroke:var(--warn); }
+  .ring-centre { position:absolute; inset:0; display:flex; flex-direction:column;
+    align-items:center; justify-content:center; text-align:center; }
+  .ring-cue { font-family:var(--mono); font-size:22px; font-weight:700; letter-spacing:.08em; }
+  .ring-count { font-family:var(--mono); font-size:52px; font-weight:700; line-height:1.05; }
+  .ring-rep { font-family:var(--mono); font-size:11px; color:var(--dim); letter-spacing:.06em; }
+  .cue-move { color:var(--accent); }
+  .cue-hold { color:var(--warn); }
+  .cue-idle { color:var(--dim); }
+
+  /* While a set runs the client needs the ring and nothing else: a phone clamped to a moving
+     stack cannot be scrolled, so anything above the ring would push it out of view. */
+  body.set-running .set-hide { display:none; }
+  body.set-running #tempoPanel { margin-top:4px; }
+  body.set-running .ring-wrap { max-width:300px; }
+
   .summary-score { text-align:center; padding:6px 0 4px; }
   .summary-score .num { font-family:var(--mono); font-size:48px; font-weight:700; line-height:1; }
   .summary-score .lbl { font-size:12px; color:var(--dim); margin-top:6px; }
@@ -131,7 +155,7 @@
   <button class="btn btn-primary" id="permitBtn">Enable Motion Access</button>
   <div class="err" id="errBox"></div>
 
-  <div class="panel">
+  <div class="panel set-hide">
     <div class="panel-title">Target Tempo (seconds)</div>
     <div style="font-size:11px;color:var(--dim);margin:-4px 0 10px;line-height:1.4;">Concentric raises the stack, eccentric lowers it — told apart by direction, not by which came first. Phases lose marks only for being <b>rushed</b>; slower than target costs nothing. Pauses are judged both ways, 20% either side free.</div>
     <div class="tempo-grid">
@@ -144,27 +168,39 @@
 
   <button class="btn btn-primary" id="startSetBtn" disabled>Start Set</button>
   <button class="btn btn-stop" id="stopSetBtn" style="display:none">Stop Set</button>
-  <button class="btn btn-ghost" id="resetBtn">Reset</button>
+  <button class="btn btn-ghost set-hide" id="resetBtn">Reset</button>
 
-  <div class="panel">
-    <div class="panel-title">Recording</div>
-    <div class="phase-big phase-idle" id="phaseBig">IDLE</div>
+  <div class="panel" id="tempoPanel">
+    <div class="panel-title">Tempo</div>
+    <div class="ring-wrap">
+      <svg class="ring" viewBox="0 0 240 240" aria-hidden="true">
+        <circle class="ring-track" cx="120" cy="120" r="104"></circle>
+        <circle class="ring-arc" id="ringArc" cx="120" cy="120" r="104"></circle>
+      </svg>
+      <div class="ring-centre">
+        <div class="ring-cue" id="ringCue">READY</div>
+        <div class="ring-count" id="ringCount">—</div>
+        <div class="ring-rep" id="ringRep">press start</div>
+      </div>
+    </div>
+    <div class="phase-big phase-idle" id="phaseBig" style="display:none">IDLE</div>
     <div class="phase-time" id="phaseTime">—</div>
     <div class="tempo-track"><div class="tempo-fill" id="tempoFill"></div></div>
-    <div style="font-size:11px;color:var(--dim);margin-top:8px;line-height:1.4;text-align:center;">
-      The bar shows live movement against the detection threshold — it should swing clearly during a rep.
+    <div class="set-hide" style="font-size:11px;color:var(--dim);margin-top:8px;line-height:1.4;text-align:center;">
+      The ring counts out your target tempo for the client to follow — it paces, it does not measure.
+      The thin bar below shows live movement against the detection threshold, and should swing clearly during a rep.
       Reps, phase times and coaching are worked out from the whole set when you press Stop.
       The screen is held awake while recording, so a long set is not cut short by auto-lock.
     </div>
   </div>
 
-  <div class="panel">
+  <div class="panel set-hide">
     <div class="panel-title">Rep Trend</div>
     <canvas id="trendCanvas" style="width:100%; height:140px; display:block; border-radius:6px; background:var(--bg-deep);"></canvas>
     <div style="font-size:11px;color:var(--dim);margin-top:8px;line-height:1.4;">Each faded line is one completed rep's acceleration through that rep, start to finish, stretched onto a common axis. The bright line is the average of the set — how tightly the faded lines hug it is the rep-to-rep consistency.</div>
   </div>
 
-  <div class="panel">
+  <div class="panel set-hide">
     <div class="panel-title">Debug / Tuning</div>
     <div class="tempo-grid" style="grid-template-columns:1fr 1fr;">
       <div class="tempo-field"><label>Min accel thresh</label><input type="number" id="aThreshIn" value="0.012" step="0.002" min="0.004"></div>
@@ -182,7 +218,7 @@
     <div style="font-size:11px;color:var(--dim);margin-top:8px;line-height:1.4;">The whole set is analysed when you press Stop, which lets it filter without lag and see each turnaround in context. Gravity and sensor noise are measured from your own recording — no per-machine setup.<br><br><b>Peak accel needs to be at least 3× threshold.</b> Below that, phase times read short rather than reps being missed outright, which is the one failure you cannot spot by eye — so it is called out above the score. Acceleration goes as stroke ÷ time², so halving the tempo costs four times the signal: <b>stroke in mm ≳ 10 × (phase seconds)²</b> on a firm mount, roughly 16× on a loose one. At a 4&nbsp;s tempo that is about 160&nbsp;mm firm, 250&nbsp;mm loose. Mount rigidity moves this more than anything else here. Pauses shorter than about 0.6&nbsp;s cannot be separated from the strokes either side.</div>
   </div>
 
-  <div class="panel">
+  <div class="panel set-hide">
     <div class="panel-title">Set Summary</div>
     <div class="warn-note" id="weakSignalNote" style="margin-top:0;margin-bottom:12px;"></div>
     <div class="summary-score">
@@ -195,14 +231,14 @@
     <div class="warn-note" id="longPauseNote"></div>
   </div>
 
-  <div class="panel">
+  <div class="panel set-hide">
     <div class="panel-title">Reps</div>
     <div id="repList"><div class="empty-note">Press Stop when the set is done — reps and phase times appear here.</div></div>
     <button class="btn btn-ghost" id="copyBtn" style="margin-top:10px; margin-bottom:8px; display:none;">Copy results</button>
     <button class="btn btn-ghost" id="rawBtn" style="margin-bottom:0; display:none; font-size:13px;">Download raw signal (.csv)</button>
   </div>
 
-  <footer>Runs entirely on-device · mount the phone rigidly to the stack carrier<br>Reads travel along gravity — built for vertical stacks, not horizontal-only machines</footer>
+  <footer class="set-hide">Runs entirely on-device · mount the phone rigidly to the stack carrier<br>Reads travel along gravity — built for vertical stacks, not horizontal-only machines</footer>
 </div>
 
 <script>
@@ -586,10 +622,12 @@ function coachingFor(slots) {
   // start to wander, and below 2x they are wrong without looking wrong.
   const SIGNAL_MARGINAL = 2.8, SIGNAL_UNUSABLE = 2.0;
   const trendCanvas = $('trendCanvas'), trendCtx = trendCanvas.getContext('2d');
+  const ringArc = $('ringArc'), ringCue = $('ringCue'), ringCount = $('ringCount'), ringRep = $('ringRep');
 
   let sensorsReady = false, recording = false;
   let samples = [], setStartT = 0, liveMax = 0, lastResult = null;
   let wakeLock = null;
+  const SETTLE_MS = 2500;   // stillness the analysis needs before the first rep
 
   // A 10-rep set at a 4s tempo is two minutes with nobody touching the screen, so iOS
   // auto-lock fires partway through and the motion events simply stop — the set comes back
@@ -914,8 +952,56 @@ function coachingFor(slots) {
              unreadable: unreadable });
   }
 
+  // --- the pacing ring -----------------------------------------------------------------
+  // Driven from the clock alone against the coach's target tempo. It deliberately knows
+  // nothing about the accelerometer: a ring that reacted to live readings would stutter
+  // whenever a reading was marginal, which is the opposite of what a tempo cue is for.
+  const RING_CIRC = 2 * Math.PI * 104;
+  let ringStart = 0;
+  function ringSegments(tgt) {
+    // A zero-length pause is simply left out rather than flashed through.
+    const segs = [{ cue: 'UP', dur: tgt.conc, pause: false }];
+    if (tgt.top > 0) segs.push({ cue: 'HOLD', dur: tgt.top, pause: true });
+    segs.push({ cue: 'DOWN', dur: tgt.ecc, pause: false });
+    if (tgt.btm > 0) segs.push({ cue: 'HOLD', dur: tgt.btm, pause: true });
+    return segs;
+  }
+  function drawRing(elapsed, tgt) {
+    const segs = ringSegments(tgt);
+    const cycle = segs.reduce((a, s) => a + s.dur, 0);
+    if (cycle <= 0) return;
+    const rep = Math.floor(elapsed / cycle);
+    let into = elapsed - rep * cycle, seg = segs[0];
+    for (const s of segs) { if (into < s.dur) { seg = s; break; } into -= s.dur; }
+    const frac = Math.max(0, Math.min(1, into / seg.dur));
+    ringArc.style.strokeDashoffset = String(RING_CIRC * (1 - frac));
+    ringArc.className.baseVal = 'ring-arc' + (seg.pause ? ' pause' : '');
+    ringCue.textContent = seg.cue;
+    ringCue.className = 'ring-cue ' + (seg.pause ? 'cue-hold' : 'cue-move');
+    // Counts down, so the number says how long is left rather than how long has passed.
+    ringCount.textContent = Math.max(0, seg.dur - into).toFixed(1);
+    ringCount.className = 'ring-count ' + (seg.pause ? 'cue-hold' : 'cue-move');
+    ringRep.textContent = 'REP ' + (rep + 1);
+  }
+  function resetRing(msg) {
+    ringArc.style.strokeDashoffset = String(RING_CIRC);
+    ringArc.className.baseVal = 'ring-arc';
+    ringCue.textContent = msg || 'READY'; ringCue.className = 'ring-cue cue-idle';
+    ringCount.textContent = '—'; ringCount.className = 'ring-count cue-idle';
+    ringRep.textContent = msg ? '' : 'press start';
+  }
+
   function tick() {
     if (!recording) return;
+    const sinceStart = performance.now() - ringStart;
+    if (sinceStart < 0) {
+      ringArc.style.strokeDashoffset = String(RING_CIRC);
+      ringArc.className.baseVal = 'ring-arc';
+      ringCue.textContent = 'SET UP'; ringCue.className = 'ring-cue cue-idle';
+      ringCount.textContent = Math.ceil(-sinceStart / 1000).toFixed(0);
+      ringCount.className = 'ring-count cue-idle';
+      ringRep.textContent = 'HOLD STILL';
+    } else drawRing(sinceStart / 1000, targets());
     const secs = (performance.now() - setStartT) / 1000;
     phaseBig.textContent = 'RECORDING';
     phaseBig.className = 'phase-big phase-moving';
@@ -966,6 +1052,9 @@ function coachingFor(slots) {
     if (!sensorsReady) return;
     samples = []; liveMax = 0; lastResult = null;
     setStartT = performance.now(); recording = true;
+    // The analysis needs a second or two of stillness to measure gravity and the noise floor,
+    // so the ring holds the client at the start rather than launching straight into rep one.
+    ringStart = setStartT + SETTLE_MS;
     repList.innerHTML = '<div class="empty-note">Recording… press Stop when the set is done.</div>';
     summaryNum.textContent = '—'; summaryLbl.textContent = 'recording';
     $('phaseAverages').innerHTML = '';
@@ -973,6 +1062,7 @@ function coachingFor(slots) {
     longPauseNote.style.display = 'none';
     statusText.textContent = 'recording'; signalText.textContent = 'signal —';
     startSetBtn.style.display = 'none'; stopSetBtn.style.display = 'block';
+    document.body.classList.add('set-running');
     errBox.style.display = 'none';
     holdScreenAwake();
     drawTrend(null);
@@ -981,17 +1071,19 @@ function coachingFor(slots) {
 
   stopSetBtn.addEventListener('click', function() {
     recording = false;
+    document.body.classList.remove('set-running');
     releaseScreen();
     statusText.textContent = 'stopped';
     phaseBig.textContent = 'SET COMPLETE'; phaseBig.className = 'phase-big phase-idle';
     phaseTime.textContent = samples.length + ' samples analysed';
     tempoFill.style.width = '0%'; tempoFill.className = 'tempo-fill';
     stopSetBtn.style.display = 'none'; startSetBtn.style.display = 'block';
+    resetRing('DONE');
     analyse();
   });
 
   resetBtn.addEventListener('click', function() {
-    recording = false; releaseScreen(); samples = []; lastResult = null;
+    recording = false; document.body.classList.remove('set-running'); releaseScreen(); samples = []; lastResult = null;
     phaseBig.textContent = 'IDLE'; phaseBig.className = 'phase-big phase-idle';
     phaseTime.textContent = '—'; tempoFill.style.width = '0%'; tempoFill.className = 'tempo-fill';
     repList.innerHTML = '<div class="empty-note">Press Stop when the set is done — reps and phase times appear here.</div>';
@@ -1006,6 +1098,7 @@ function coachingFor(slots) {
     stopSetBtn.style.display = 'none'; startSetBtn.style.display = 'block';
     startSetBtn.disabled = !sensorsReady;
     statusText.textContent = sensorsReady ? 'ready' : 'idle';
+    resetRing();
     drawTrend(null);
   });
 
@@ -1136,6 +1229,7 @@ function coachingFor(slots) {
     reader.readAsText(file);
   });
 
+  resetRing();
   sizeCanvas(); drawTrend(null);
 })();
 </script>
