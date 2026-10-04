@@ -6,141 +6,147 @@
 <title>Rep Quality Scorer</title>
 <style>
   :root {
-    --bg: #002D52;
-    --bg-deep: #001d38;
-    --panel: #073d68;
-    --line: #14538a;
-    --ink: #FFFFFF;
-    --dim: #9fc3de;
-    --accent: #A9E154;
-    --warn: #f0a860;
-    --bad: #ff6b5e;
-    --mono: 'SF Mono', Menlo, Consolas, monospace;
+    --bg: #EFEFF2;            /* page: light system grey, cards float on it */
+    --card: #FFFFFF;
+    --blue: #1565C0;          /* the app's primary */
+    --blue-dark: #0F4C96;
+    --ink: #0B0B0C;           /* near-black for the numbers that matter */
+    --ink-2: #3C3C43;
+    --dim: #8A8A8E;           /* iOS secondary label */
+    --hair: #E3E3E8;
+    --warn: #E8833A;
+    --bad: #D93025;
+    --sans: -apple-system, BlinkMacSystemFont, 'SF Pro Text', 'Segoe UI', Roboto, sans-serif;
   }
   * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
   html, body { margin:0; padding:0; background:var(--bg); color:var(--ink);
-    font-family:-apple-system,BlinkMacSystemFont,'SF Pro Text',sans-serif; min-height:100vh; }
-  .wrap { max-width:480px; margin:0 auto; padding:20px 16px 60px; }
+    font-family:var(--sans); min-height:100vh; -webkit-font-smoothing:antialiased; }
+  .wrap { max-width:480px; margin:0 auto; padding:14px 16px 56px; }
 
-  header { display:flex; align-items:baseline; justify-content:space-between;
-    border-bottom:1px solid var(--line); padding-bottom:12px; margin-bottom:16px; }
-  .brand { font-family:var(--mono); font-size:10px; letter-spacing:.14em; color:var(--dim); text-transform:uppercase; }
-  h1 { font-size:19px; font-weight:600; letter-spacing:-.01em; margin:3px 0 0; }
+  header { display:flex; align-items:center; justify-content:space-between; padding:6px 2px 16px; }
+  .brand { font-size:11px; letter-spacing:.02em; color:var(--dim); text-transform:uppercase; font-weight:600; }
+  h1 { font-size:24px; font-weight:700; letter-spacing:-.02em; margin:2px 0 0; }
   .status-dot { width:8px; height:8px; border-radius:50%; background:var(--dim); display:inline-block; margin-right:6px; }
-  .status-dot.live { background:var(--accent); box-shadow:0 0 8px var(--accent); animation:pulse 1.4s ease-in-out infinite; }
-  @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:.5} }
-  .status-row { font-family:var(--mono); font-size:10px; color:var(--dim); text-align:right; }
+  .status-dot.live { background:var(--blue); box-shadow:0 0 0 3px rgba(21,101,192,.18); animation:pulse 1.6s ease-in-out infinite; }
+  @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:.45} }
+  .status-row { font-size:11px; color:var(--dim); text-align:right; font-weight:500; }
 
-  .panel { background:var(--panel); border:1px solid var(--line); border-radius:12px; padding:16px; margin-bottom:12px; }
-  .panel-title { font-family:var(--mono); font-size:10px; letter-spacing:.1em; text-transform:uppercase; color:var(--dim); margin-bottom:12px; }
+  /* Cards: white, generous radius, no border — separated by the grey page showing through. */
+  .panel { background:var(--card); border-radius:18px; padding:18px 18px; margin-bottom:12px; }
+  .panel-title { font-size:17px; font-weight:600; letter-spacing:-.01em; color:var(--ink); margin-bottom:14px; }
 
   .tempo-grid { display:grid; grid-template-columns:1fr 1fr 1fr 1fr; gap:8px; }
   .tempo-field { text-align:center; }
-  .tempo-field label { display:block; font-size:9px; color:var(--dim); margin-bottom:4px; font-family:var(--mono); }
-  .tempo-field input { width:100%; background:var(--bg-deep); border:1px solid var(--line); color:var(--ink);
-    border-radius:6px; padding:8px 4px; text-align:center; font-family:var(--mono); font-size:14px; }
+  .tempo-field label { display:block; font-size:11px; color:var(--dim); margin-bottom:6px; font-weight:500; }
+  .tempo-field input { width:100%; background:var(--card); border:1px solid var(--hair); color:var(--ink);
+    border-radius:10px; padding:12px 4px; text-align:center; font-family:var(--sans);
+    font-size:22px; font-weight:700; letter-spacing:-.02em; }
+  .tempo-field input:focus { outline:none; border-color:var(--blue); }
 
-  .btn { width:100%; padding:15px; border:none; border-radius:10px; font-size:15px; font-weight:600;
-    letter-spacing:-.01em; cursor:pointer; margin-bottom:10px; }
-  .btn-primary { background:var(--accent); color:var(--bg); }
+  .btn { width:100%; padding:16px; border:none; border-radius:12px; font-size:16px; font-weight:600;
+    letter-spacing:-.01em; cursor:pointer; margin-bottom:10px; font-family:var(--sans); }
+  .btn-primary { background:var(--blue); color:#FFFFFF; }
   .btn-stop { background:var(--bad); color:#FFFFFF; }
-  .btn-ghost { background:transparent; border:1px solid var(--line); color:var(--dim); }
-  .btn:active { transform:scale(0.98); }
-  .btn:disabled { opacity:0.35; }
+  .btn-ghost { background:var(--card); color:var(--blue); }
+  .btn:active { transform:scale(0.985); }
+  .btn:disabled { background:#C9CAD0; color:#FFFFFF; }
 
-  .err { background:rgba(240,168,96,.1); border:1px solid var(--warn); color:var(--warn);
-    padding:12px 14px; border-radius:8px; font-size:13px; margin-bottom:14px; display:none; }
+  .err { background:#FDECEA; border:none; color:var(--bad);
+    padding:14px 16px; border-radius:12px; font-size:14px; margin-bottom:12px; display:none; font-weight:500; }
 
-  .live-row { display:flex; gap:10px; margin-bottom:2px; }
-  .live-box { flex:1; background:var(--bg-deep); border:1px solid var(--line); border-radius:8px; padding:10px; text-align:center; }
-  .live-box .lbl { font-family:var(--mono); font-size:9px; color:var(--dim); text-transform:uppercase; letter-spacing:.08em; }
-  .live-box .val { font-family:var(--mono); font-size:16px; font-weight:700; margin-top:4px; }
-  .phase-moving { color:var(--accent); }
-  .phase-paused { color:var(--warn); }
-  .phase-idle { color:var(--dim); }
+  .live-row { display:flex; gap:8px; margin-bottom:2px; }
+  .live-box { flex:1; background:var(--bg); border-radius:12px; padding:12px 8px; text-align:center; }
+  .live-box .lbl { font-size:10px; color:var(--dim); text-transform:uppercase; letter-spacing:.04em; font-weight:600; }
+  .live-box .val { font-size:19px; font-weight:700; margin-top:4px; letter-spacing:-.02em; }
 
-  /* Tempo bar fills toward the current phase's target, so "am I on pace" reads at a glance
-     from across a gym floor instead of needing the number to be parsed. */
-  .phase-big { text-align:center; font-family:var(--mono); font-size:26px; font-weight:700;
-    letter-spacing:.04em; margin:4px 0 2px; }
-  .phase-time { text-align:center; font-family:var(--mono); font-size:13px; color:var(--dim); margin-bottom:10px; }
-  .tempo-track { position:relative; height:12px; background:var(--bg-deep); border:1px solid var(--line);
-    border-radius:6px; overflow:hidden; }
-  .tempo-fill { height:100%; width:0%; background:var(--accent); transition:width .06s linear; }
-  .tempo-fill.over { background:var(--bad); }
-  .tempo-fill.pause { background:var(--warn); }
-
-  /* The client's pacing ring. Prescriptive, not reactive: it counts out the target tempo and
-     owes nothing to the sensor, so it cannot be thrown by a reading the way a live readout
-     would be. Sized to be read at arm's length from a stack-mounted phone. */
-  .ring-wrap { position:relative; width:100%; max-width:260px; margin:4px auto 10px; aspect-ratio:1; }
+  /* The pacing ring. Blue through the moving phases to sit in the app's palette, orange
+     through the holds, which is the one colour the brief named. */
+  .ring-wrap { position:relative; width:100%; max-width:280px; margin:2px auto 8px; aspect-ratio:1; }
   .ring { width:100%; height:100%; transform:rotate(-90deg); display:block; }
-  .ring-track { fill:none; stroke:var(--bg-deep); stroke-width:16; }
-  .ring-arc { fill:none; stroke:var(--accent); stroke-width:16; stroke-linecap:round;
+  .ring-track { fill:none; stroke:#E8E8ED; stroke-width:18; }
+  .ring-arc { fill:none; stroke:var(--blue); stroke-width:18; stroke-linecap:round;
     stroke-dasharray:653.45; stroke-dashoffset:653.45; }
   .ring-arc.pause { stroke:var(--warn); }
   .ring-centre { position:absolute; inset:0; display:flex; flex-direction:column;
     align-items:center; justify-content:center; text-align:center; }
-  .ring-cue { font-family:var(--mono); font-size:22px; font-weight:700; letter-spacing:.08em; }
-  .ring-count { font-family:var(--mono); font-size:52px; font-weight:700; line-height:1.05; }
-  .ring-rep { font-family:var(--mono); font-size:11px; color:var(--dim); letter-spacing:.06em; }
-  .cue-move { color:var(--accent); }
+  .ring-cue { font-size:20px; font-weight:700; letter-spacing:.02em; }
+  .ring-count { font-size:72px; font-weight:800; line-height:1; letter-spacing:-.045em; color:var(--ink); }
+  .ring-rep { font-size:12px; color:var(--dim); letter-spacing:.04em; font-weight:600; margin-top:2px; }
+  .cue-move { color:var(--blue); }
   .cue-hold { color:var(--warn); }
   .cue-idle { color:var(--dim); }
 
-  /* While a set runs the client needs the ring and nothing else: a phone clamped to a moving
-     stack cannot be scrolled, so anything above the ring would push it out of view. */
+  .phase-big { text-align:center; font-size:22px; font-weight:700; margin:4px 0 2px; }
+  .phase-time { text-align:center; font-size:13px; color:var(--dim); margin-bottom:10px; font-weight:500; }
+  .tempo-track { position:relative; height:8px; background:#E8E8ED; border-radius:4px; overflow:hidden; }
+  .tempo-fill { height:100%; width:0%; background:var(--blue); transition:width .06s linear; }
+  .tempo-fill.over { background:var(--bad); }
+  .tempo-fill.pause { background:var(--warn); }
+
   body.set-running .set-hide { display:none; }
-  body.set-running #tempoPanel { margin-top:4px; }
-  body.set-running .ring-wrap { max-width:300px; }
-  body.ring-off #ringSvg { opacity:.18; }
+  body.set-running #tempoPanel { margin-top:2px; }
+  body.set-running .ring-wrap { max-width:320px; }
+  body.ring-off #ringSvg { opacity:.14; }
 
-  .ring-toggle { display:flex; align-items:flex-start; gap:10px; cursor:pointer; }
-  .ring-toggle input { width:20px; height:20px; accent-color:var(--accent); margin:1px 0 0; flex:none; }
-  .ring-toggle b { font-size:13px; font-weight:600; display:block; }
-  .ring-toggle-sub { display:block; font-size:11px; color:var(--dim); line-height:1.4; margin-top:3px; }
+  .ring-toggle { display:flex; align-items:flex-start; gap:12px; cursor:pointer; }
+  .ring-toggle input { width:22px; height:22px; accent-color:var(--blue); margin:1px 0 0; flex:none; }
+  .ring-toggle b { font-size:15px; font-weight:600; display:block; }
+  .ring-toggle-sub { display:block; font-size:12px; color:var(--dim); line-height:1.4; margin-top:3px; }
 
-  .summary-score { text-align:center; padding:6px 0 4px; }
-  .summary-score .num { font-family:var(--mono); font-size:48px; font-weight:700; line-height:1; }
-  .summary-score .lbl { font-size:12px; color:var(--dim); margin-top:6px; }
+  .summary-score { text-align:center; padding:4px 0 10px; }
+  .summary-score .num { font-size:68px; font-weight:800; line-height:1; letter-spacing:-.045em; }
+  .summary-score .lbl { font-size:14px; color:var(--dim); margin-top:6px; font-weight:500; }
 
-  .rep-card { background:var(--bg-deep); border:1px solid var(--line); border-radius:10px; padding:12px 14px; margin-bottom:8px; }
-  .rep-card-top { display:flex; justify-content:space-between; align-items:baseline; margin-bottom:8px; }
-  .rep-num { font-family:var(--mono); font-size:11px; color:var(--dim); }
-  .rep-composite { font-family:var(--mono); font-size:20px; font-weight:700; }
-  .sub-scores { display:grid; grid-template-columns:1fr 1fr; gap:6px; }
-  .sub-score { display:flex; justify-content:space-between; font-size:11px; }
-  .sub-score .k { color:var(--dim); font-family:var(--mono); }
-  .sub-score .v { font-family:var(--mono); font-weight:600; }
-  .phase-times { display:grid; grid-template-columns:repeat(4,1fr); gap:6px; margin:4px 0 0; }
-  /* Set-level averages: one row per movement phase, the unit a coach actually cues. */
-  .pa-row { display:grid; grid-template-columns:1fr auto auto; align-items:baseline; gap:10px;
-    padding:9px 10px; background:var(--bg-deep); border:1px solid var(--line);
-    border-radius:8px; margin-bottom:6px; }
-  .pa-name { font-size:12px; }
-  .pa-sub { display:block; font-family:var(--mono); font-size:9px; color:var(--dim); margin-top:2px; }
-  .pa-time { font-family:var(--mono); font-size:15px; font-weight:700; }
-  .pa-score { font-family:var(--mono); font-size:17px; font-weight:700; min-width:34px; text-align:right; }
-  .pt { background:rgba(255,255,255,.04); border-radius:6px; padding:6px 2px; text-align:center; }
-  .ptk { display:block; font-family:var(--mono); font-size:8px; letter-spacing:.06em;
-    text-transform:uppercase; color:var(--dim); }
-  .ptv { display:block; font-family:var(--mono); font-size:14px; font-weight:700; margin-top:2px; }
+  /* One row per movement phase: name and detail left, time and score right. */
+  .pa-row { display:grid; grid-template-columns:1fr auto auto; align-items:center; gap:12px;
+    padding:14px 14px; background:var(--bg); border-radius:14px; margin-bottom:8px; }
+  .pa-name { font-size:15px; font-weight:600; }
+  .pa-sub { display:block; font-size:11px; color:var(--dim); margin-top:3px; font-weight:500; line-height:1.35; }
+  .pa-time { font-size:20px; font-weight:700; letter-spacing:-.02em; }
+  .pa-score { font-size:22px; font-weight:800; min-width:40px; text-align:right; letter-spacing:-.03em; }
 
-  .score-good { color:var(--accent); }
+  .rep-card { background:var(--bg); border-radius:14px; padding:14px; margin-bottom:8px; }
+  .rep-card-top { display:flex; justify-content:space-between; align-items:baseline; margin-bottom:10px; }
+  .rep-num { font-size:13px; color:var(--dim); font-weight:600; letter-spacing:.02em; }
+  .rep-composite { font-size:22px; font-weight:800; letter-spacing:-.03em; }
+  .sub-scores { display:grid; grid-template-columns:1fr 1fr; gap:8px; }
+  .sub-score { display:flex; justify-content:space-between; font-size:13px; }
+  .sub-score .k { color:var(--dim); font-weight:500; }
+  .sub-score .v { font-weight:700; }
+  .phase-times { display:grid; grid-template-columns:repeat(4,1fr); gap:8px; margin:4px 0 0; }
+  .pt { background:var(--card); border-radius:10px; padding:10px 2px; text-align:center; }
+  .ptk { display:block; font-size:10px; letter-spacing:.04em;
+    text-transform:uppercase; color:var(--dim); font-weight:600; }
+  .ptv { display:block; font-size:19px; font-weight:700; margin-top:3px; letter-spacing:-.02em; }
+
+  .score-good { color:var(--blue); }
   .score-mid { color:var(--warn); }
   .score-bad { color:var(--bad); }
 
-  .empty-note { color:var(--dim); font-size:12px; text-align:center; padding:12px 0; }
-  footer { text-align:center; font-family:var(--mono); font-size:9px; color:var(--dim); margin-top:20px; letter-spacing:.04em; line-height:1.5; }
+  .panel-summary { font-size:17px; font-weight:600; letter-spacing:-.01em; color:var(--ink);
+    cursor:pointer; list-style:none; }
+  .panel-summary::-webkit-details-marker { display:none; }
+  .panel-summary::after { content:'\203A'; float:right; color:var(--dim); font-size:22px; line-height:.8;
+    transform:rotate(90deg); display:inline-block; }
+  details[open] .panel-summary { margin-bottom:14px; }
+  details[open] .panel-summary::after { transform:rotate(-90deg); }
+
+  .empty-note { color:var(--dim); font-size:14px; text-align:center; padding:18px 0; font-weight:500; }
+  footer { text-align:center; font-size:11px; color:var(--dim); margin-top:22px; line-height:1.6; font-weight:500; }
 
   .flash-overlay { position:fixed; inset:0; background:var(--bad); opacity:0; pointer-events:none; z-index:999; }
   .flash-overlay.on { animation:flashPulse 0.5s ease-out; }
-  @keyframes flashPulse { 0%{opacity:0.8} 100%{opacity:0} }
+  @keyframes flashPulse { 0%{opacity:0.55} 100%{opacity:0} }
 
-  .coach-line { font-size:12px; text-align:center; margin-top:10px; padding-top:10px; border-top:1px solid var(--line); }
-  .warn-note { background:rgba(240,168,96,.1); border:1px solid var(--warn); color:var(--warn);
-    padding:10px 12px; border-radius:8px; font-size:11px; line-height:1.4; margin-top:10px; display:none; }
-  .warn-note.bad { background:rgba(255,107,94,.12); border-color:var(--bad); color:var(--bad); }
+  .coach-line { font-size:14px; text-align:center; margin-top:12px; padding-top:14px;
+    border-top:1px solid var(--hair); font-weight:600; line-height:1.4; }
+  .warn-note { background:#FFF4E8; border:none; color:#9A5518;
+    padding:14px 16px; border-radius:12px; font-size:13px; line-height:1.45; margin-top:12px;
+    display:none; font-weight:500; }
+  .warn-note.bad { background:#FDECEA; color:#A32218; }
+
+  canvas#trendCanvas { background:var(--bg) !important; }
+  input[type=file] { font-size:12px; color:var(--dim); }
 </style>
 </head>
 <body>
@@ -149,7 +155,7 @@
 
   <header>
     <div>
-      <div class="brand">Prototype · V2</div>
+      <div class="brand">Prototype</div>
       <h1>Rep Quality Scorer</h1>
     </div>
     <div class="status-row">
@@ -214,12 +220,13 @@
 
   <div class="panel set-hide">
     <div class="panel-title">Rep Trend</div>
-    <canvas id="trendCanvas" style="width:100%; height:140px; display:block; border-radius:6px; background:var(--bg-deep);"></canvas>
+    <canvas id="trendCanvas" style="width:100%; height:150px; display:block; border-radius:12px; background:var(--bg);"></canvas>
     <div style="font-size:11px;color:var(--dim);margin-top:8px;line-height:1.4;">Each faded line is one completed rep's acceleration through that rep, start to finish, stretched onto a common axis. The bright line is the average of the set — how tightly the faded lines hug it is the rep-to-rep consistency.</div>
   </div>
 
   <div class="panel set-hide">
-    <div class="panel-title">Debug / Tuning</div>
+    <details>
+    <summary class="panel-summary">Debug / Tuning</summary>
     <div class="tempo-grid" style="grid-template-columns:1fr 1fr;">
       <div class="tempo-field"><label>Min accel thresh</label><input type="number" id="aThreshIn" value="0.012" step="0.002" min="0.004"></div>
       <div class="tempo-field"><label>Min pause (s)</label><input type="number" id="minPauseIn" value="0.6" step="0.1" min="0.3"></div>
@@ -234,6 +241,7 @@
       <input type="file" id="csvIn" accept=".csv,text/csv" style="font-size:11px;color:var(--dim);width:100%;">
     </div>
     <div style="font-size:11px;color:var(--dim);margin-top:8px;line-height:1.4;">The whole set is analysed when you press Stop, which lets it filter without lag and see each turnaround in context. Gravity and sensor noise are measured from your own recording — no per-machine setup.<br><br><b>Peak accel needs to be at least 3× threshold.</b> Below that, phase times read short rather than reps being missed outright, which is the one failure you cannot spot by eye — so it is called out above the score. Acceleration goes as stroke ÷ time², so halving the tempo costs four times the signal: <b>stroke in mm ≳ 10 × (phase seconds)²</b> on a firm mount, roughly 16× on a loose one. At a 4&nbsp;s tempo that is about 160&nbsp;mm firm, 250&nbsp;mm loose. Mount rigidity moves this more than anything else here. Pauses shorter than about 0.6&nbsp;s cannot be separated from the strokes either side.</div>
+    </details>
   </div>
 
   <div class="panel set-hide">
@@ -242,7 +250,7 @@
     <div class="summary-score">
       <div class="num" id="summaryNum">—</div>
       <div class="lbl" id="summaryLbl">no reps yet</div>
-      <div style="font-size:10px;color:var(--dim);margin-top:4px;font-family:var(--mono);">how close the set held the target tempo</div>
+      <div style="font-size:12px;color:var(--dim);margin-top:4px;font-weight:500;">how close the set held the target tempo</div>
     </div>
     <div id="phaseAverages"></div>
     <div class="coach-line" id="coachLine" style="display:none;"></div>
@@ -722,7 +730,7 @@ function coachingFor(slots) {
     sizeCanvas();
     const rect = trendCanvas.getBoundingClientRect(), w = rect.width, h = rect.height;
     trendCtx.clearRect(0, 0, w, h);
-    trendCtx.strokeStyle = '#14538a'; trendCtx.lineWidth = 1;
+    trendCtx.strokeStyle = '#D8D8DE'; trendCtx.lineWidth = 1;
     trendCtx.beginPath(); trendCtx.moveTo(0, h / 2); trendCtx.lineTo(w, h / 2); trendCtx.stroke();
     if (!res || !res.seg || !res.reps.length) return;
 
@@ -741,11 +749,11 @@ function coachingFor(slots) {
       tr.forEach((v, k) => { const x = xAt(k), y = yAt(v); k ? trendCtx.lineTo(x, y) : trendCtx.moveTo(x, y); });
       trendCtx.stroke();
     };
-    traces.forEach(tr => line(tr, 'rgba(169,225,84,0.22)', 1.5));
+    traces.forEach(tr => line(tr, 'rgba(21,101,192,0.20)', 1.5));
     const avg = new Array(N).fill(0);
     traces.forEach(tr => tr.forEach((v, k) => avg[k] += v / traces.length));
-    line(avg, '#A9E154', 3);
-    trendCtx.fillStyle = '#9fc3de'; trendCtx.font = '9px monospace';
+    line(avg, '#1565C0', 3);
+    trendCtx.fillStyle = '#8A8A8E'; trendCtx.font = '10px -apple-system, sans-serif';
     trendCtx.fillText('+' + maxAbs.toFixed(3) + ' m/s²', 4, 10);
     trendCtx.fillText('-' + maxAbs.toFixed(3) + ' m/s²', 4, h - 4);
     trendCtx.fillText(res.reps.length + (res.reps.length === 1 ? ' rep' : ' reps'), w - 44, 10);
@@ -1016,7 +1024,7 @@ function coachingFor(slots) {
     ringArc.style.strokeDashoffset = String(RING_CIRC);
     ringArc.className.baseVal = 'ring-arc';
     ringCue.textContent = msg || 'READY'; ringCue.className = 'ring-cue cue-idle';
-    ringCount.textContent = '—'; ringCount.className = 'ring-count cue-idle';
+    ringCount.textContent = ''; ringCount.className = 'ring-count cue-idle';
     ringRep.textContent = msg ? '' : 'press start';
   }
 
@@ -1221,7 +1229,7 @@ function coachingFor(slots) {
       // Clipboard access can be refused outright; falling back to a selectable box means the
       // numbers are still recoverable by hand rather than lost.
       const ta = document.createElement('textarea');
-      ta.value = txt; ta.style.cssText = 'width:100%;height:160px;margin-top:8px;background:var(--bg-deep);color:var(--ink);border:1px solid var(--line);border-radius:8px;font-family:var(--mono);font-size:11px;padding:8px;';
+      ta.value = txt; ta.style.cssText = 'width:100%;height:160px;margin-top:8px;background:var(--bg);color:var(--ink);border:1px solid var(--hair);border-radius:10px;font-family:ui-monospace,Menlo,monospace;font-size:11px;padding:10px;';
       copyBtn.parentNode.insertBefore(ta, copyBtn.nextSibling);
       ta.select();
     }
