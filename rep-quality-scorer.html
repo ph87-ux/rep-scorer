@@ -207,7 +207,7 @@
 
   <header>
     <div>
-      <div class="brand">Prototype · build 05 Oct 11:49 UTC</div>
+      <div class="brand">Prototype · velocity engine · build 05 Oct 20:02 UTC</div>
       <h1>Rep Quality Scorer</h1>
     </div>
     <div class="status-row">
@@ -312,6 +312,7 @@
       <div class="num" id="summaryNum">—</div>
       <div class="lbl" id="summaryLbl">no reps yet</div>
       <div style="font-size:12px;color:var(--dim);margin-top:4px;font-weight:500;">how close the set held the target tempo</div>
+      <div id="engineNote" style="display:none;font-size:12px;color:var(--warn);margin-top:6px;font-weight:600;"></div>
     </div>
     <div id="phaseAverages"></div>
     <div class="coach-line" id="coachLine" style="display:none;"></div>
@@ -1305,6 +1306,10 @@ function coachingFor(slots) {
       const avg = rated.reduce((a, s) => a + s.score, 0) / rated.length;
       summaryNum.textContent = avg.toFixed(0);
       summaryNum.className = 'num ' + scoreClass(avg);
+      $('engineNote').textContent = (res.seg && res.seg.method === 'acceleration')
+        ? 'read by the fallback engine — not comparable with other sets'
+        : '';
+      $('engineNote').style.display = (res.seg && res.seg.method === 'acceleration') ? 'block' : 'none';
       summaryLbl.textContent = res.reps.length + (res.reps.length === 1 ? ' rep' : ' reps') + ' this set'
         + (tut !== null ? ' · ' + tut.toFixed(0) + 's under tension' : '');
     } else {
