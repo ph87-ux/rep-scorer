@@ -142,6 +142,13 @@
   .trend-note.on { color:var(--blue); }
   .trend-note.off { color:var(--warn); }
 
+  .sess-row { display:grid; grid-template-columns:1fr auto auto; align-items:center; gap:10px;
+    padding:12px 14px; background:var(--bg); border-radius:12px; margin-bottom:6px; }
+  .sess-name { font-size:14px; font-weight:600; }
+  .sess-sub { display:block; font-size:11px; color:var(--dim); margin-top:3px; font-weight:500; }
+  .sess-score { font-size:18px; font-weight:800; min-width:34px; text-align:right; letter-spacing:-.02em; }
+  .sess-flag { font-size:10px; font-weight:700; color:var(--bad); letter-spacing:.03em; }
+
   .empty-note { color:var(--dim); font-size:14px; text-align:center; padding:18px 0; font-weight:500; }
   footer { text-align:center; font-size:11px; color:var(--dim); margin-top:22px; line-height:1.6; font-weight:500; }
 
@@ -166,7 +173,7 @@
 
   <header>
     <div>
-      <div class="brand">Prototype · build 05 Oct 10:16 UTC</div>
+      <div class="brand">Prototype · build 05 Oct 10:32 UTC</div>
       <h1>Rep Quality Scorer</h1>
     </div>
     <div class="status-row">
@@ -178,6 +185,16 @@
   <button class="btn btn-primary" id="permitBtn">Enable Motion Access</button>
 
   <div class="err" id="errBox"></div>
+
+  <div class="panel set-hide">
+    <div class="panel-title">Machine</div>
+    <input type="text" id="machineIn" placeholder="e.g. C1 — Pullover" autocomplete="off"
+      style="width:100%;background:var(--card);border:1px solid var(--hair);color:var(--ink);
+      border-radius:10px;padding:13px 14px;font-family:var(--sans);font-size:16px;font-weight:600;">
+    <div style="font-size:12px;color:var(--dim);margin-top:8px;line-height:1.45;font-weight:500;">
+      Kept with each set so a session across several machines stays sorted. The analysis needs
+      no per-machine setup — gravity and noise are measured from every recording.</div>
+  </div>
 
   <div class="panel set-hide">
     <div class="panel-title">Target Tempo (seconds)</div>
@@ -265,6 +282,13 @@
     <div id="phaseAverages"></div>
     <div class="coach-line" id="coachLine" style="display:none;"></div>
     <div class="warn-note" id="longPauseNote"></div>
+  </div>
+
+  <div class="panel set-hide" id="sessionPanel" style="display:none;">
+    <div class="panel-title">This session</div>
+    <div id="sessionList"></div>
+    <button class="btn btn-ghost" id="sessionCopyBtn" style="margin-top:12px;margin-bottom:8px;font-size:13px;">Copy whole session (JSON)</button>
+    <button class="btn btn-ghost" id="sessionClearBtn" style="margin-bottom:0;font-size:13px;color:var(--bad);">Clear session</button>
   </div>
 
   <div class="panel set-hide">
@@ -1077,6 +1101,14 @@ function coachingFor(slots) {
     } else weakSignalNote.style.display = 'none';
 
     drawTrend(res);
+
+    // Keep the set. Recorded even when it cannot be trusted, flagged rather than dropped —
+    // a set that failed is still evidence, and silently discarding it would hide a rig
+    // problem behind an apparently short session.
+    const rec = resultRecord(res);
+    rec.machine = $('machineIn').value.trim() || null;
+    session.push(rec);
+    saveSession(); renderSession();
   }
 
   function analyse() {
@@ -1473,6 +1505,62 @@ function coachingFor(slots) {
     } else dumpFallback(text, jsonBtn);
   });
 
+  // --- the session: a holding pen, not a history -----------------------------------------
+  // The coach's own platform owns client records, so this deliberately does not try to be a
+  // second one. It only has to stop a session's work evaporating between the machine and the
+  // handoff: across ten machines at three sets each, copying every set separately is thirty
+  // transfers and nobody will do it. Sets accumulate here and leave as one payload.
+  //
+  // Held in localStorage so a reload, a backgrounded tab or a flat battery does not lose a
+  // session mid-floor. Results only, never raw signal: a set's record is under a kilobyte, so
+  // even a long session stays far inside any storage limit.
+  const SESSION_KEY = 'repscorer.session';
+  let session = [];
+  try { session = JSON.parse(localStorage.getItem(SESSION_KEY) || '[]') || []; } catch (e) { session = []; }
+
+  function saveSession() {
+    try { localStorage.setItem(SESSION_KEY, JSON.stringify(session)); } catch (e) {}
+  }
+  function renderSession() {
+    const panel = $('sessionPanel'), list = $('sessionList');
+    if (!session.length) { panel.style.display = 'none'; list.innerHTML = ''; return; }
+    panel.style.display = 'block';
+    list.innerHTML = session.map(function(r, i) {
+      const m = r.measured, q = r.quality;
+      const name = r.machine || 'Set ' + (i + 1);
+      const score = m.qualityScore === null ? '—' : m.qualityScore;
+      const cls = m.qualityScore === null ? '' :
+        (m.qualityScore >= 80 ? 'score-good' : (m.qualityScore >= 55 ? 'score-mid' : 'score-bad'));
+      return '<div class="sess-row"><span class="sess-name">' + esc(name)
+        + '<span class="sess-sub">' + m.reps + (m.reps === 1 ? ' rep · ' : ' reps · ')
+        + (m.timeUnderTensionSeconds === null ? '—' : m.timeUnderTensionSeconds + 's')
+        + ' under tension</span></span>'
+        + (q.trustworthy ? '<span></span>' : '<span class="sess-flag">CHECK</span>')
+        + '<span class="sess-score ' + cls + '">' + score + '</span></div>';
+    }).join('');
+  }
+  function esc(s) {
+    return String(s).replace(/[&<>"]/g, function(c) {
+      return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c];
+    });
+  }
+
+  $('sessionCopyBtn').addEventListener('click', function() {
+    const btn = $('sessionCopyBtn');
+    const text = JSON.stringify({ schema: 'rep-scorer-session/1',
+      exportedAt: new Date().toISOString(), sets: session }, null, 2);
+    const done = () => { btn.textContent = 'Copied'; setTimeout(function(){ btn.textContent = 'Copy whole session (JSON)'; }, 1600); };
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      navigator.clipboard.writeText(text).then(done).catch(function(){ dumpFallback(text, btn); });
+    } else dumpFallback(text, btn);
+  });
+  $('sessionClearBtn').addEventListener('click', function() {
+    // Deliberately a confirm: a session is several machines' work and there is no undo.
+    if (!session.length) return;
+    if (!window.confirm('Clear all ' + session.length + ' sets from this session?')) return;
+    session = []; saveSession(); renderSession();
+  });
+
   // The recording itself, so a trial that went wrong can be replayed through the segmenter
   // offline instead of being argued about from summary numbers.
   const rawBtn = $('rawBtn');
@@ -1520,7 +1608,7 @@ function coachingFor(slots) {
     reader.readAsText(file);
   });
 
-  resetRing();
+  resetRing(); renderSession();
   sizeCanvas(); drawTrend(null);
 })();
 </script>
