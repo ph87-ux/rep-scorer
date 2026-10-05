@@ -176,11 +176,13 @@
   .trend-note.on { color:var(--blue); }
   .trend-note.off { color:var(--warn); }
 
-  .sess-row { display:grid; grid-template-columns:1fr auto auto; align-items:center; gap:10px;
+  .sess-row { display:grid; grid-template-columns:1fr auto auto auto; align-items:center; gap:10px;
     padding:12px 14px; background:var(--bg); border-radius:12px; margin-bottom:6px; }
   .sess-name { font-size:14px; font-weight:600; }
   .sess-sub { display:block; font-size:11px; color:var(--dim); margin-top:3px; font-weight:500; }
   .sess-score { font-size:18px; font-weight:800; min-width:34px; text-align:right; letter-spacing:-.02em; }
+  .sess-csv { background:none; border:1px solid var(--hair); color:var(--blue); font-family:var(--sans);
+    font-size:11px; font-weight:700; padding:3px 8px; border-radius:7px; cursor:pointer; }
   .sess-flag { font-size:10px; font-weight:700; color:var(--bad); letter-spacing:.03em; }
 
   .empty-note { color:var(--dim); font-size:14px; text-align:center; padding:18px 0; font-weight:500; }
@@ -1422,6 +1424,13 @@ function coachingFor(slots) {
     // problem behind an apparently short session.
     const rec = resultRecord(res);
     rec.machine = $('machineIn').value.trim() || null;
+    // Keep the recording itself with the set. Raw samples used to live in one variable that
+    // the next set cleared, so the only set whose signal could be exported was the most
+    // recent one, and only until another was started. A trial of several sets therefore
+    // destroyed its own evidence as it went: by the time a reading looked wrong, the data
+    // needed to explain it was gone. Stored as the CSV text rather than the sample objects
+    // because it is about a fifth of the size and is exactly what gets downloaded.
+    rec.raw = samplesToCsv(samples);
     session.push(rec);
     saveSession(); renderSession();
   }
@@ -1882,7 +1891,18 @@ function coachingFor(slots) {
   try { session = JSON.parse(localStorage.getItem(SESSION_KEY) || '[]') || []; } catch (e) { session = []; }
 
   function saveSession() {
-    try { localStorage.setItem(SESSION_KEY, JSON.stringify(session)); } catch (e) {}
+    // Recordings are much bigger than the summaries they sit beside, so a long session can
+    // exceed the storage quota. Summaries are the thing that must survive, so on a failure
+    // the oldest recordings are dropped one at a time until it fits. Losing the oldest raw
+    // signal is recoverable; losing the whole session is not.
+    for (;;) {
+      try { localStorage.setItem(SESSION_KEY, JSON.stringify(session)); return; }
+      catch (e) {
+        const oldest = session.find(function(r) { return r.raw; });
+        if (!oldest) { try { localStorage.removeItem(SESSION_KEY); } catch (e2) {} return; }
+        delete oldest.raw;
+      }
+    }
   }
   function renderSession() {
     const panel = $('sessionPanel'), list = $('sessionList');
@@ -1898,9 +1918,18 @@ function coachingFor(slots) {
         + '<span class="sess-sub">' + m.reps + (m.reps === 1 ? ' rep · ' : ' reps · ')
         + (m.timeUnderTensionSeconds === null ? '—' : m.timeUnderTensionSeconds + 's')
         + ' under tension</span></span>'
+        + (r.raw ? '<button class="sess-csv" data-i="' + i + '">CSV</button>' : '<span></span>')
         + (q.trustworthy ? '<span></span>' : '<span class="sess-flag">CHECK</span>')
         + '<span class="sess-score ' + cls + '">' + score + '</span></div>';
     }).join('');
+    Array.prototype.forEach.call(list.querySelectorAll('.sess-csv'), function(b) {
+      b.addEventListener('click', function() {
+        const r = session[+b.getAttribute('data-i')];
+        if (!r || !r.raw) return;
+        downloadCsv(r.raw, r.recordedAt);
+        b.textContent = 'OK'; setTimeout(function(){ b.textContent = 'CSV'; }, 1400);
+      });
+    });
   }
   function esc(s) {
     return String(s).replace(/[&<>"]/g, function(c) {
@@ -1908,10 +1937,18 @@ function coachingFor(slots) {
     });
   }
 
+  // The recordings are deliberately left out of this: it is meant to be pasted somewhere,
+  // and a few sets of raw signal would run to hundreds of thousands of lines. The per-set
+  // CSV buttons are how the signal leaves the phone.
+  function sessionForExport() {
+    return session.map(function(r) {
+      const c = Object.assign({}, r); delete c.raw; return c;
+    });
+  }
   $('sessionCopyBtn').addEventListener('click', function() {
     const btn = $('sessionCopyBtn');
     const text = JSON.stringify({ schema: 'rep-scorer-session/1',
-      exportedAt: new Date().toISOString(), sets: session }, null, 2);
+      exportedAt: new Date().toISOString(), sets: sessionForExport() }, null, 2);
     const done = () => { btn.textContent = 'Copied'; setTimeout(function(){ btn.textContent = 'Copy whole session (JSON)'; }, 1600); };
     if (navigator.clipboard && navigator.clipboard.writeText) {
       navigator.clipboard.writeText(text).then(done).catch(function(){ dumpFallback(text, btn); });
@@ -1926,19 +1963,27 @@ function coachingFor(slots) {
 
   // The recording itself, so a trial that went wrong can be replayed through the segmenter
   // offline instead of being argued about from summary numbers.
-  const rawBtn = $('rawBtn');
-  rawBtn.addEventListener('click', function() {
-    if (!samples.length) return;
-    const t0 = samples[0].t;
-    const rows = ['t_ms,magnitude'];
-    for (const s of samples) rows.push((s.t - t0).toFixed(1) + ',' + s.mag.toFixed(4));
-    const blob = new Blob([rows.join('\n')], { type: 'text/csv' });
+  function samplesToCsv(arr) {
+    if (!arr || !arr.length) return '';
+    const t0 = arr[0].t, rows = ['t_ms,magnitude'];
+    for (const s of arr) rows.push((s.t - t0).toFixed(1) + ',' + s.mag.toFixed(4));
+    return rows.join('\n');
+  }
+  function downloadCsv(text, stamp) {
+    if (!text) return;
+    const blob = new Blob([text], { type: 'text/csv' });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
-    a.download = 'rep-set-' + new Date().toISOString().slice(0, 19).replace(/[:T]/g, '-') + '.csv';
+    a.download = 'rep-set-' + String(stamp || new Date().toISOString())
+      .slice(0, 19).replace(/[:T]/g, '-') + '.csv';
     document.body.appendChild(a); a.click(); document.body.removeChild(a);
     setTimeout(function() { URL.revokeObjectURL(url); }, 2000);
+  }
+  const rawBtn = $('rawBtn');
+  rawBtn.addEventListener('click', function() {
+    if (!samples.length) return;
+    downloadCsv(samplesToCsv(samples));
     rawBtn.textContent = 'Saved'; setTimeout(function(){ rawBtn.textContent = 'Download raw signal (.csv)'; }, 1600);
   });
 
