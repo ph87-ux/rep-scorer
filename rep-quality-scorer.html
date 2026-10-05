@@ -90,6 +90,40 @@
   .tempo-fill.over { background:var(--bad); }
   .tempo-fill.pause { background:var(--warn); }
 
+  /* --- the three screens ---------------------------------------------------
+     One page, three moments: setting the machine up, lifting, and reading the
+     result. They were all stacked on one scroll before, which made a client
+     wade past the tempo inputs and a debug panel to reach their own score, and
+     made the thing read as a test harness rather than a product. Nothing is
+     moved in the DOM — the wrap is a flex column and each screen reorders it —
+     so every id and event handler still points where it did.
+
+     SETUP (default): machine, tempo, ring toggle, Start. The result panels are
+     empty at this point and showing an empty score helps no one, so they stay
+     hidden until there is something in them.
+     RUNNING (body.set-running): the ring and the Stop button, nothing else.
+     RESULT (body.has-result): the score leads, then the trend, then the reps.
+     Setup drops below them, because by then it has already been used, and the
+     debug panel goes to the very bottom. */
+  .wrap { display:flex; flex-direction:column; }
+  header { order:-10; }
+  #permitBtn, #errBox { order:-9; }
+  .stage-setup { order:10; }
+  .stage-live  { order:20; }
+  .stage-result{ order:30; }
+  .stage-dev   { order:40; }
+
+  body:not(.has-result) .stage-result { display:none; }
+
+  body.has-result .stage-result { order:10; }
+  body.has-result #panelSummary { order:9; }
+  body.has-result #panelTrend   { order:11; }
+  body.has-result #panelReps    { order:12; }
+  body.has-result #sessionPanel { order:13; }
+  body.has-result .stage-live   { order:20; }
+  body.has-result .stage-setup  { order:30; }
+  body.has-result #startSetBtn  { order:29; }
+
   body.set-running .set-hide { display:none; }
   body.set-running #tempoPanel { margin-top:2px; }
   body.set-running .ring-wrap { max-width:290px; }
@@ -186,7 +220,7 @@
 
   <div class="err" id="errBox"></div>
 
-  <div class="panel set-hide">
+  <div class="panel set-hide stage-setup" id="panelMachine">
     <div class="panel-title">Machine</div>
     <input type="text" id="machineIn" placeholder="e.g. C1 — Pullover" autocomplete="off"
       style="width:100%;background:var(--card);border:1px solid var(--hair);color:var(--ink);
@@ -196,7 +230,7 @@
       no per-machine setup — gravity and noise are measured from every recording.</div>
   </div>
 
-  <div class="panel set-hide">
+  <div class="panel set-hide stage-setup" id="panelTempo">
     <div class="panel-title">Target Tempo (seconds)</div>
     <div style="font-size:11px;color:var(--dim);margin:-4px 0 10px;line-height:1.4;">Concentric raises the stack, eccentric lowers it — told apart by direction, not by which came first. Phases lose marks only for being <b>rushed</b>; slower than target costs nothing. Pauses are judged both ways, 20% either side free.</div>
     <div class="tempo-grid">
@@ -207,7 +241,7 @@
     </div>
   </div>
 
-  <div class="panel set-hide" style="padding:12px 14px;">
+  <div class="panel set-hide stage-setup" id="panelRing" style="padding:12px 14px;">
     <label class="ring-toggle">
       <input type="checkbox" id="ringToggle" checked>
       <span>
@@ -218,11 +252,11 @@
     </label>
   </div>
 
-  <button class="btn btn-primary" id="startSetBtn" disabled>Start Set</button>
+  <button class="btn btn-primary stage-setup" id="startSetBtn" disabled>Start Set</button>
   <button class="btn btn-stop" id="stopSetBtn" style="display:none">Stop Set</button>
-  <button class="btn btn-ghost set-hide" id="resetBtn">Reset</button>
+  <button class="btn btn-ghost set-hide stage-setup" id="resetBtn">Reset</button>
 
-  <div class="panel" id="tempoPanel">
+  <div class="panel stage-live" id="tempoPanel">
     <div class="panel-title" id="tempoPanelTitle">Tempo</div>
     <div class="ring-wrap">
       <svg class="ring" id="ringSvg" viewBox="0 0 240 240" aria-hidden="true">
@@ -244,14 +278,14 @@
     </div>
   </div>
 
-  <div class="panel set-hide">
+  <div class="panel set-hide stage-result" id="panelTrend">
     <div class="panel-title">Target vs actual</div>
     <canvas id="trendCanvas" style="width:100%; height:190px; display:block; border-radius:12px; background:var(--bg);"></canvas>
     <div class="trend-note" id="trendNote"></div>
     <div style="font-size:11px;color:var(--dim);margin-top:8px;line-height:1.4;">Stack position through the set. The dashed line is the tempo you prescribed; the solid line is what was lifted. They start together, so a rep that runs long pushes the solid line permanently right — the widening gap is fatigue accumulating.</div>
   </div>
 
-  <div class="panel set-hide">
+  <div class="panel set-hide stage-dev" id="panelDebug">
     <details>
     <summary class="panel-summary">Debug / Tuning</summary>
     <div class="tempo-grid" style="grid-template-columns:1fr 1fr;">
@@ -271,7 +305,7 @@
     </details>
   </div>
 
-  <div class="panel set-hide">
+  <div class="panel set-hide stage-result" id="panelSummary">
     <div class="panel-title">Set Summary</div>
     <div class="warn-note" id="weakSignalNote" style="margin-top:0;margin-bottom:12px;"></div>
     <div class="summary-score">
@@ -284,14 +318,14 @@
     <div class="warn-note" id="longPauseNote"></div>
   </div>
 
-  <div class="panel set-hide" id="sessionPanel" style="display:none;">
+  <div class="panel set-hide stage-result" id="sessionPanel" style="display:none;">
     <div class="panel-title">This session</div>
     <div id="sessionList"></div>
     <button class="btn btn-ghost" id="sessionCopyBtn" style="margin-top:12px;margin-bottom:8px;font-size:13px;">Copy whole session (JSON)</button>
     <button class="btn btn-ghost" id="sessionClearBtn" style="margin-bottom:0;font-size:13px;color:var(--bad);">Clear session</button>
   </div>
 
-  <div class="panel set-hide">
+  <div class="panel set-hide stage-result" id="panelReps">
     <div class="panel-title">Reps</div>
     <div id="repList"><div class="empty-note">Press Stop when the set is done — reps and phase times appear here.</div></div>
     <button class="btn btn-ghost" id="copyBtn" style="margin-top:10px; margin-bottom:8px; display:none;">Copy results</button>
@@ -1636,12 +1670,19 @@ function coachingFor(slots) {
     stopSetBtn.style.display = 'none'; startSetBtn.style.display = 'block';
     resetRing('DONE');
     $('tempoPanelTitle').textContent = 'Tempo';
+    // Reveal before analysing. The result panels are display:none until this class is
+    // set, and a canvas measured while hidden has zero width, so drawing the trend
+    // first produced an empty chart.
+    document.body.classList.add('has-result');
     analyse();
+    $('panelSummary').scrollIntoView({ behavior: 'smooth', block: 'start' });
   }
   stopSetBtn.addEventListener('click', finishSet);
 
   resetBtn.addEventListener('click', function() {
-    recording = false; document.body.classList.remove('set-running'); releaseScreen(); samples = []; lastResult = null;
+    recording = false; document.body.classList.remove('set-running');
+    document.body.classList.remove('has-result');
+    releaseScreen(); samples = []; lastResult = null;
     phaseBig.textContent = 'IDLE'; phaseBig.className = 'phase-big phase-idle';
     phaseTime.textContent = '—'; tempoFill.style.width = '0%'; tempoFill.className = 'tempo-fill';
     repList.innerHTML = '<div class="empty-note">Press Stop when the set is done — reps and phase times appear here.</div>';
@@ -1911,6 +1952,7 @@ function coachingFor(slots) {
       phaseBig.textContent = 'LOADED'; phaseBig.className = 'phase-big phase-idle';
       phaseTime.textContent = samples.length + ' samples from file';
       errBox.style.display = 'none';
+      document.body.classList.add('has-result');
       analyse();
     };
     reader.readAsText(file);
