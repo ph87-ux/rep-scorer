@@ -173,7 +173,7 @@
 
   <header>
     <div>
-      <div class="brand">Prototype · build 05 Oct 10:32 UTC</div>
+      <div class="brand">Prototype · build 05 Oct 10:50 UTC</div>
       <h1>Rep Quality Scorer</h1>
     </div>
     <div class="status-row">
@@ -601,12 +601,16 @@ function segmentBest(samples, opts) {
 // rushing loses marks. The fast side keeps a small fixed allowance because the segmenter's
 // own timing is good to roughly a tenth of a second, and penalising inside measurement error
 // is scoring noise rather than lifting.
-const FAST_GRACE = 0.2;
+// 15% of the target, so the allowance scales: 0.6s on a 4s contraction, 0.3s on a 2s one.
+// A fixed 0.2s was too tight on a long phase and too loose on a short one. The floor only
+// bites on very brief targets, where 15% would be finer than the measurement itself.
+const FAST_GRACE_FRAC = 0.15;
 function scorePhase(actual, target, tol) {
   if (actual >= target) return 100;              // slower than asked: no penalty, by design
   const err = target - actual;
-  if (err <= FAST_GRACE) return 100;
-  return Math.max(0, 100 - ((err - FAST_GRACE) / (tol * 2)) * 100);
+  const grace = Math.max(0.15, target * FAST_GRACE_FRAC);
+  if (err <= grace) return 100;
+  return Math.max(0, 100 - ((err - grace) / (tol * 2)) * 100);
 }
 
 // A pause is wrong in both directions — too short loses the hold, too long bleeds tension —
