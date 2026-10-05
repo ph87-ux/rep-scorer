@@ -166,7 +166,7 @@
 
   <header>
     <div>
-      <div class="brand">Prototype · build 05 Oct 09:51 UTC</div>
+      <div class="brand">Prototype · build 05 Oct 10:16 UTC</div>
       <h1>Rep Quality Scorer</h1>
     </div>
     <div class="status-row">
@@ -375,13 +375,23 @@ function segmentSet(samples, opts) {
   // an integral whose drift was what previously broke rep pairing.
   const phases = [];
   let group = [];
+  // Fraction of a lobe's peak that marks the phase edge.
+  //
+  // This was 0.5, on the reasoning that zero-phase filtering smears a sharp transition
+  // symmetrically so the half-peak crossing sits on its true position. That holds for a
+  // cosine stroke, whose acceleration is at maximum the instant it starts — which is what
+  // every simulation here used. A human does not lift like that. A smooth controlled lift
+  // accelerates gently, so acceleration peaks mid-stroke and half of peak is only reached
+  // deep inside it: the rule cut roughly 0.7s off each end and banked it as pause, making
+  // the reading WORSE the better the lifting was. A field trial following the tempo ring
+  // accurately came back reading 2.3s of movement against 4.2s of pause, for a 4-2 target.
+  //
+  // Measured across lifting styles from sharp to fully smooth, 0.2 roughly halves the worst
+  // case: smooth strokes move from 33% short to 12% short, while a fast rep — the case the
+  // original 0.5 was chosen to protect — only drifts from exact to 10% long.
+  const EDGE_FRAC = 0.2;
   const halfCross = (L, fromStart) => {
-    // The outer edge of a phase is a sharp transition in the real signal, and
-    // zero-phase filtering smears such a step symmetrically about its true position.
-    // The half-peak crossing therefore sits exactly on it, whereas the threshold
-    // crossing sits far out on the smeared tail — an error that grows with signal
-    // strength (nearly a second on a fast, powerful rep).
-    const half = L.peak * 0.5;
+    const half = L.peak * EDGE_FRAC;
     if (fromStart) { for (let i = L.startI; i <= L.peakI; i++) if (Math.abs(af[i]) >= half) return t[i]; return t[L.startI]; }
     for (let i = L.endI; i >= L.peakI; i--) if (Math.abs(af[i]) >= half) return t[i];
     return t[L.endI];
