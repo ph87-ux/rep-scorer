@@ -3,8 +3,9 @@
   "purpose": "Per-machine hold rules. A hold is scored differently depending on whether the muscle is still loaded in that position or the load has been taken off it. Without this every pause is judged the same way, which penalises a client for holding a loaded contraction and lets a rest at the bottom pass.",
   "classificationTest": "Put the machine in the hold position and ask: if the client completely relaxed right now, would the stack move? If it drops, the muscle was holding it -> LOADED. If nothing happens, the skeleton or the resting plates are taking the load -> REST.",
   "rules": {
-    "LOADED": "The hold is work. Scored one-sided, like a contraction: holding longer than target is free, cutting it short deducts.",
-    "REST": "The hold is dead time. Holding longer than target deducts."
+    "LOADED": "The hold is work. Scored one-sided, like a contraction: cutting it short deducts, holding longer than target is free and keeps full marks. Decided deliberately — a client holding 6s against a 2s target scores 100, and a set can run long without costing quality marks as long as nothing is rushed. Accepted because the muscle is under load throughout.",
+    "REST": "The hold is dead time. Scored both ways: cutting it short deducts, and so does running long, since tension is off and the extra seconds are rest rather than work.",
+    "shortAlwaysDeducts": "Cutting any hold short deducts, on every machine and at both ends. The classification only decides whether running LONG costs anything."
   },
   "positions": {
     "top": "Stack raised. Always the end of the concentric and the muscle at its shortest, whichever way the client's limb travelled.",
