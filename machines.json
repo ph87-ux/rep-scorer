@@ -128,5 +128,13 @@
     "bottomPosition": "HOVER",
     "note": "Clients are always coached to hover at the bottom rather than set the plates down. A hovered stack stays suspended, so the muscle is still holding it and the bottom hold is LOADED by default across the estate. A machine only overrides this if its own bottom position genuinely sheds the load."
   },
-  "notes": "The divide is push versus pull, not single-joint versus multi-joint. Pressing movements lock out and the skeleton takes the load, so their top hold is REST. Pulling movements have no lockout and the muscle holds throughout, so their top hold is LOADED however many joints are involved."
+  "notes": "The divide is push versus pull, not single-joint versus multi-joint. Pressing movements lock out and the skeleton takes the load, so their top hold is REST. Pulling movements have no lockout and the muscle holds throughout, so their top hold is LOADED however many joints are involved.",
+  "defaultTargetTempo": {
+    "notation": "4-2-4-2",
+    "concentricSeconds": 4,
+    "topPauseSeconds": 2,
+    "eccentricSeconds": 4,
+    "bottomPauseSeconds": 2,
+    "note": "Prescribed across the estate. Held here once rather than copied onto every machine, so changing the prescription is one edit. A machine's own targetTempo stays null unless it needs to differ — null means inherit this. Order is concentric first, which is how the app's inputs read; standard coaching notation starts with the eccentric, so 4-2-4-2 is only identical because it is symmetric."
+  }
 }
