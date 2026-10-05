@@ -28,6 +28,15 @@
       "stackTravelMm": null,
       "targetTempo": null,
       "notes": "Hamstring holds the pad against resistance at full knee flexion, with no position the skeleton can take over. Bottom is a coached hover, so the hamstring keeps holding the load in the stretched position."
+    },
+    {
+      "code": "B7",
+      "name": "Leg Curl (seated)",
+      "topHold": "LOADED",
+      "bottomHold": "LOADED",
+      "stackTravelMm": null,
+      "targetTempo": null,
+      "notes": "Hamstring holds against resistance at full flexion. Bottom set to LOADED by the coached-hover policy — submitted as REST, which would only be right if this machine's bottom position sheds the load even when hovered. Confirm."
     }
   ],
   "coaching": {
