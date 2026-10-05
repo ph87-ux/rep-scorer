@@ -1,0 +1,28 @@
+{
+  "schema": "rep-scorer-machines/1",
+  "purpose": "Per-machine hold rules. A hold is scored differently depending on whether the muscle is still loaded in that position or the load has been taken off it. Without this every pause is judged the same way, which penalises a client for holding a loaded contraction and lets a rest at the bottom pass.",
+
+  "classificationTest": "Put the machine in the hold position and ask: if the client completely relaxed right now, would the stack move? If it drops, the muscle was holding it -> LOADED. If nothing happens, the skeleton or the resting plates are taking the load -> REST.",
+
+  "rules": {
+    "LOADED": "The hold is work. Scored one-sided, like a contraction: holding longer than target is free, cutting it short deducts.",
+    "REST": "The hold is dead time. Holding longer than target deducts."
+  },
+
+  "positions": {
+    "top": "Stack raised. Always the end of the concentric and the muscle at its shortest, whichever way the client's limb travelled.",
+    "bottom": "Stack down. Start position, muscle at its longest. Note this one can follow the prescription rather than the machine: touching the plates down releases tension (REST), hovering just above keeps it (LOADED)."
+  },
+
+  "machines": [
+    {
+      "code": "B1",
+      "name": "Leg Extension",
+      "topHold": "LOADED",
+      "bottomHold": "REST",
+      "stackTravelMm": null,
+      "targetTempo": null,
+      "notes": "Knee cannot lock out and shed load to the skeleton, so the quad holds the leg against the pad through full extension. Bottom assumes the plates are set down; if coached to hover, bottom becomes LOADED."
+    }
+  ]
+}
