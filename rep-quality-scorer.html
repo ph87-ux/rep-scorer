@@ -173,7 +173,7 @@
 
   <header>
     <div>
-      <div class="brand">Prototype · build 05 Oct 10:50 UTC</div>
+      <div class="brand">Prototype · build 05 Oct 11:49 UTC</div>
       <h1>Rep Quality Scorer</h1>
     </div>
     <div class="status-row">
@@ -727,7 +727,20 @@ function coachingFor(slots) {
   // movement has been seen keeps it from firing during the hold-still countdown at the
   // start. Pressing Stop still works and is always quicker.
   const AUTO_STOP_MS = 12000, AUTO_WARN_MS = 7000;
+  const STILL_CEILING = 0.12;   // m/s^2 — above this it is moving, whatever the noise estimate says
   let lastMotionT = 0, sawMotion = false;
+
+  // The set does not begin when the button is pressed. A client has to cradle the phone, hit
+  // start, then get seated and take hold — easily fifteen or twenty seconds, during which the
+  // old fixed countdown had the ring a rep and a half ahead of them before they touched the
+  // machine, and the setup movement landed in the recording as though it were lifting.
+  //
+  // So pressing Start only ARMS it. The set begins once the stack has been still for the
+  // settle period, which is the client in position and ready. Stillness is used rather than a
+  // travel trip because travel cannot be measured live — integrating velocity in real time
+  // drifts without bound, which is why that approach was abandoned early. Stillness is already
+  // detected reliably; it is what ends the set too.
+  let armed = false, setBegun = false, trimFromT = 0;
 
   // A 10-rep set at a 4s tempo is two minutes with nobody touching the screen, so iOS
   // auto-lock fires partway through and the motion events simply stop — the set comes back
@@ -1117,6 +1130,12 @@ function coachingFor(slots) {
 
   function analyse() {
     const tgt = targets();
+    // Everything before the client settled is cradling the phone and getting seated, not
+    // lifting. Dropped so it cannot produce phases or distort the baseline.
+    if (trimFromT) {
+      const kept = samples.filter(s => s.t >= trimFromT);
+      if (kept.length > 30) samples = kept;
+    }
     const seg = segmentBest(samples, segOpts(tgt));
     const minPause = parseFloat($('minPauseIn').value) || 0.6;
 
@@ -1232,8 +1251,38 @@ function coachingFor(slots) {
       // 0.8 multiplier called it moving forever and auto-stop never fired. Mid-stroke the
       // same measure runs about 1.9x on a marginal rig and 5x on a good one, so 1.4 sits
       // clear of stillness with room left to catch the weakest real movement.
-      if (dev > thr * 1.4) { lastMotionT = now; sawMotion = true; }
+      // The threshold adapts to recent noise, which backfires on violent movement: thrashing
+      // the phone about while getting seated raises thr above the very motion producing it,
+      // and the set reads as "still" and starts early. A rigidly mounted phone at rest never
+      // produces a mean deviation anywhere near this ceiling, so capping the stillness test
+      // only bites when the window is far too noisy to be a resting stack.
+      const stillThr = Math.min(thr * 1.4, STILL_CEILING);
+      if (dev > stillThr) { lastMotionT = now; if (setBegun) sawMotion = true; }
     }
+    const stillFor = now - lastMotionT;
+
+    // Armed but not yet started: wait for the client to be in position and still.
+    if (armed && !setBegun) {
+      if (stillFor >= SETTLE_MS && samples.length > 30) {
+        setBegun = true;
+        ringStart = now;
+        // Keep the quiet settle itself — gravity and the noise floor are measured from it —
+        // but drop the getting-seated movement before it.
+        trimFromT = now - SETTLE_MS;
+      } else {
+        setBubble(R_MIN, false);
+        ringCue.textContent = 'GET SET';
+        ringCue.className = 'ring-cue cue-idle';
+        ringRep.textContent = stillFor >= 600
+          ? 'STARTING IN ' + Math.max(1, Math.ceil((SETTLE_MS - stillFor) / 1000))
+          : 'HOLD STILL WHEN READY';
+        phaseBig.textContent = 'ARMED';
+        phaseTime.textContent = 'waiting for you to settle · ' + samples.length + ' samples';
+        requestAnimationFrame(tick);
+        return;
+      }
+    }
+
     const still = sawMotion ? now - lastMotionT : 0;
     if (sawMotion && still >= AUTO_STOP_MS) { finishSet(); return; }
     const ending = (sawMotion && still >= AUTO_WARN_MS)
@@ -1252,13 +1301,8 @@ function coachingFor(slots) {
       return;
     }
     const sinceStart = now - ringStart;
-    if (sinceStart < 0) {
-      setBubble(R_MIN, false);
-      ringCue.textContent = Math.ceil(-sinceStart / 1000).toFixed(0);
-      ringCue.className = 'ring-cue cue-idle';
-      ringRep.textContent = 'HOLD STILL';
-    } else {
-      drawRing(sinceStart / 1000, targets());
+    {
+      drawRing(Math.max(0, sinceStart) / 1000, targets());
       // Counted down out loud rather than ending without warning, so a client taking a
       // breather mid-set can see it coming and move before it does.
       if (ending) ringRep.textContent = ending;
@@ -1300,10 +1344,11 @@ function coachingFor(slots) {
     if (!sensorsReady) return;
     samples = []; liveMax = 0; lastResult = null;
     setStartT = performance.now(); recording = true;
+    armed = true; setBegun = false; trimFromT = 0;
     lastMotionT = setStartT; sawMotion = false;
     // The analysis needs a second or two of stillness to measure gravity and the noise floor,
     // so the ring holds the client at the start rather than launching straight into rep one.
-    ringStart = setStartT + SETTLE_MS;
+    ringStart = 0;   // set once the client has settled, not from the button press
     repList.innerHTML = '<div class="empty-note">Recording… press Stop when the set is done.</div>';
     summaryNum.textContent = '—'; summaryLbl.textContent = 'recording';
     $('phaseAverages').innerHTML = '';
