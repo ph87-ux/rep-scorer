@@ -549,6 +549,231 @@ function segmentSet(samples, opts) {
   return { gRef, sigma, thr, peak, phases, reps, alternation, t, a, af };
 }
 
+// --- segmentation from reconstructed velocity -------------------------------
+// This replaces reading phase boundaries off acceleration lobes, which had a defect no
+// amount of tuning could fix: acceleration is near zero BOTH when the stack is still and
+// when it moves at a steady speed. A controlled rep spends most of each stroke at nearly
+// constant velocity, so the better the lifting, the less there is to see. Acceleration
+// appears only in the brief moments of starting and stopping. A field trial following the
+// tempo ring accurately came back reading a 1.8s concentric and a 0.9s eccentric against a
+// 4.0s target, while its total cadence — 12.4s per rep against a 12s prescription — was
+// almost exactly right. The time was all there; it was being filed under the pauses.
+//
+// Velocity does not have that blind spot. It is large and flat throughout a steady stroke
+// and genuinely zero during a hold, which is precisely the distinction being measured.
+// The reason it was not used from the start is drift: integrating a sensor whose zero is
+// slightly wrong gives a velocity that ramps away without bound, and the error grows with
+// the length of the set. The fix is that a set contains its own corrections. At the top and
+// bottom of every rep the stack is stationary, so whatever velocity the integration reports
+// during a hold IS the accumulated error, measured directly. Hence two passes:
+//
+//   1. Reconstruct velocity with an aggressive high-pass and find the STRUCTURE — where
+//      the holds are. This pass only has to locate them, so it can afford a filter that
+//      distorts durations in exchange for being robust to a bad gravity reference.
+//   2. Reconstruct velocity again with a gentle high-pass, which preserves the stroke
+//      (a 12s rep is 0.08 Hz, uncomfortably close to the 0.05 Hz used in pass 1), then
+//      subtract the drift measured at the pause anchors from pass 1. Boundaries can now be
+//      placed with a tight threshold, because zero finally means zero.
+//
+// Measured against the fatigue fixture, whose six reps degrade from 4-2-4-2 at 300mm to
+// 6.2-3.3-6.4-3.6 at 200mm, mean error is 0.16s on strokes and 0.11s on holds, and travel
+// lands within 8%. On the exactly-known 4-2-4-2 fixture, strokes read 3.92-4.08s and holds
+// 1.88-2.07s. At a 4s target those errors sit well inside the scoring grace band, so they
+// cannot of themselves cost a client marks. The error grows on the slowest reps — a true
+// 6.2s stroke reads 5.98s — but a stroke that slow already scores full marks for being
+// slower than target, so the method is least accurate exactly where accuracy matters least.
+const STRUCT_HP = 0.05;   // Hz, pass 1: robust structure finding
+const MEAS_HP   = 0.015;  // Hz, pass 2: preserves the stroke, drift handled by pinning
+const ACC_FC    = 1.2;    // Hz, de-noise acceleration before integrating
+const COARSE_FRAC = 0.18; // pass 1 move threshold, as a fraction of typical peak speed
+const FINE_FRAC   = 0.05; // pass 2 move threshold
+const MIN_MOVE_S  = 0.35; // shortest credible stroke
+const MIN_HOLD_S  = 0.25; // shortest credible hold
+
+function filtfiltHz(arr, fc, hz) {
+  const al = 1 - Math.exp(-2 * Math.PI * fc / hz);
+  let y = arr[0]; const f = [];
+  for (let i = 0; i < arr.length; i++) { y += al * (arr[i] - y); f.push(y); }
+  y = f[f.length - 1]; const b = new Array(f.length);
+  for (let i = f.length - 1; i >= 0; i--) { y += al * (f[i] - y); b[i] = y; }
+  return b;
+}
+
+// Label every sample up / down / holding, group into runs, then clean the runs up. Two
+// cleanups, both needed. Runs too brief to be a real movement get absorbed into their
+// neighbours. And a "stroke" that travels far less than the set's typical stroke is not a
+// stroke at all but drift inside a hold that happened to cross the threshold — demoting
+// those is what stops one long hold being reported as three phases.
+function runsFromVelocity(vel, pos, t, thr, minMoveMs, minHoldMs) {
+  const n = vel.length;
+  let runs = [];
+  for (let i = 0; i < n; i++) {
+    const s = Math.abs(vel[i]) < thr ? 0 : (vel[i] > 0 ? 1 : -1);
+    if (!runs.length || runs[runs.length - 1].s !== s) runs.push({ s: s, i0: i, i1: i });
+    else runs[runs.length - 1].i1 = i;
+  }
+  const dur = r => t[r.i1] - t[r.i0];
+  const absorb = () => {
+    let changed = true;
+    while (changed) {
+      changed = false;
+      for (let k = 1; k < runs.length - 1; k++) {
+        const r = runs[k], lim = r.s === 0 ? minHoldMs : minMoveMs;
+        if (dur(r) < lim) {
+          const L = runs[k - 1], R = runs[k + 1];
+          if (L.s === R.s) { L.i1 = R.i1; runs.splice(k, 2); }
+          else if (dur(L) >= dur(R)) { L.i1 = r.i1; runs.splice(k, 1); }
+          else { R.i0 = r.i0; runs.splice(k, 1); }
+          changed = true; break;
+        }
+      }
+    }
+  };
+  absorb();
+  const moveTravel = runs.filter(r => r.s !== 0).map(r => Math.abs(pos[r.i1] - pos[r.i0]));
+  const typical = moveTravel.length ? median(moveTravel) : 0;
+  const floor = Math.max(typical * 0.2, 0.012);   // 12mm absolute, or a fifth of typical
+  for (const r of runs) if (r.s !== 0 && Math.abs(pos[r.i1] - pos[r.i0]) < floor) r.s = 0;
+  for (let k = runs.length - 1; k > 0; k--) {
+    if (runs[k].s === runs[k - 1].s) { runs[k - 1].i1 = runs[k].i1; runs.splice(k, 1); }
+  }
+  absorb();
+  return runs;
+}
+
+function segmentVelocity(samples, opts) {
+  const o = Object.assign({ structHp: STRUCT_HP, measHp: MEAS_HP, accFc: ACC_FC }, opts || {});
+  const empty = {
+    reps: [], phases: [], holds: [], gRef: 0, sigma: 0, thr: 0, peak: 0,
+    alternation: 1, travelCV: null, anchors: 0, t: [], a: [], af: [], vel: [], pos: []
+  };
+  if (!samples || samples.length < 60) return empty;
+
+  const t = samples.map(s => s.t);                 // ms
+  const n = t.length, spanS = (t[n - 1] - t[0]) / 1000;
+  if (!(spanS > 1)) return empty;
+  const hz = n / spanS, dtS = spanS / (n - 1);
+
+  const mag = samples.map(s => s.mag);
+  const gRef = o.gRef != null ? o.gRef : median(mag.filter((_, i) => t[i] - t[0] < 3000));
+  const a = mag.map(m => m - gRef);
+  const sigma = robustSigma(mag);
+  const af = filtfiltHz(a, o.accFc, hz);
+  const peak = af.length ? Math.max.apply(null, af.map(Math.abs)) : 0;
+  const thr = Math.max(sigma * 0.29 * 3, 0.012);
+
+  const integrate = arr => {
+    let x = 0; const out = [];
+    for (let i = 0; i < arr.length; i++) { x += arr[i] * dtS; out.push(x); }
+    return out;
+  };
+  const detrend = (arr, fc) => {
+    const tr = filtfiltHz(arr, fc, hz);
+    return arr.map((x, i) => x - tr[i]);
+  };
+  const moveThr = (v, frac) => {
+    const sp = v.map(Math.abs).sort((x, y) => x - y);
+    return Math.max(sp[Math.floor(sp.length * 0.85)] * frac, 0.0015);
+  };
+  const minMoveMs = MIN_MOVE_S * 1000, minHoldMs = MIN_HOLD_S * 1000;
+
+  // pass 1 — structure
+  const velS = detrend(integrate(af), o.structHp);
+  const posS = detrend(integrate(velS), o.structHp * 0.8);
+  let runs = runsFromVelocity(velS, posS, t, moveThr(velS, COARSE_FRAC), minMoveMs, minHoldMs);
+
+  // pass 2 — measure, with drift pinned to zero through the hold interiors
+  const velM = detrend(integrate(af), o.measHp);
+  const anchors = [];
+  for (const r of runs) {
+    if (r.s !== 0) continue;
+    const len = r.i1 - r.i0, pad = Math.floor(len * 0.2);
+    const a0 = r.i0 + pad, a1 = r.i1 - pad;
+    if (a1 - a0 < 3) continue;
+    let sum = 0;
+    for (let i = a0; i <= a1; i++) sum += velM[i];
+    anchors.push({ i: (a0 + a1) >> 1, v: sum / (a1 - a0 + 1) });
+  }
+  let vel = velM;
+  if (anchors.length >= 2) {
+    const last = anchors[anchors.length - 1];
+    vel = velM.map((x, i) => {
+      let bias;
+      if (i <= anchors[0].i) bias = anchors[0].v;
+      else if (i >= last.i) bias = last.v;
+      else {
+        let k = 0;
+        while (anchors[k + 1].i < i) k++;
+        const A = anchors[k], B = anchors[k + 1];
+        bias = A.v + (B.v - A.v) * (i - A.i) / (B.i - A.i);
+      }
+      return x - bias;
+    });
+    runs = runsFromVelocity(vel, integrate(vel), t, moveThr(vel, FINE_FRAC), minMoveMs, minHoldMs);
+  }
+  const pos = integrate(vel);
+
+  // Moving runs become phases, in the same shape the rest of the app already consumes, so
+  // the pauses still fall out of the gaps between them. The difference is that a pause is
+  // now a measured stretch of standstill rather than whatever was left over.
+  const phases = [], holds = [];
+  for (const r of runs) {
+    if (r.s === 0) { holds.push({ start: t[r.i0], end: t[r.i1], dur: (t[r.i1] - t[r.i0]) / 1000 }); continue; }
+    let pk = 0;
+    for (let i = r.i0; i <= r.i1; i++) pk = Math.max(pk, Math.abs(af[i]));
+    phases.push({
+      start: t[r.i0], end: t[r.i1], startI: r.i0, endI: r.i1,
+      dir: r.s, peak: pk, dur: (t[r.i1] - t[r.i0]) / 1000,
+      travel: Math.abs(pos[r.i1] - pos[r.i0]),
+      peakSpeed: Math.max.apply(null, vel.slice(r.i0, r.i1 + 1).map(Math.abs))
+    });
+  }
+
+  let alternations = 0;
+  for (let i = 1; i < phases.length; i++) if (phases[i].dir !== phases[i - 1].dir) alternations++;
+  const alternation = phases.length > 1 ? alternations / (phases.length - 1) : 1;
+
+  // A stack has a fixed range of motion, so genuine strokes travel about the same distance
+  // every rep, and the spread of that distance is a far better integrity test for this
+  // method than the old peak-to-threshold ratio was. That ratio asked whether acceleration
+  // lobes stood clear of the noise; integration averages noise down, so a signal it would
+  // have condemned is read perfectly well here, and keeping it would have told clients
+  // their good data was unusable. Measured: 2% spread on the exact fixtures, 11-15% on real
+  // freehand and on a fatiguing set whose range genuinely shortens, 93% on a set with a
+  // stack clang in it. Fatigue must not be flagged, so the bar sits well above 15%.
+  const strokeTravel = phases.map(p => p.travel);
+  let travelCV = null;
+  if (strokeTravel.length >= 3) {
+    const m = median(strokeTravel);
+    if (m > 0) {
+      let ss = 0;
+      for (const x of strokeTravel) ss += (x - m) * (x - m);
+      travelCV = Math.sqrt(ss / strokeTravel.length) / m;
+    }
+  }
+
+  const reps = [];
+  const p1Dir = phases.length ? phases[0].dir : 1;
+  for (let i = 0; i + 1 < phases.length; i++) {
+    const A = phases[i], B = phases[i + 1];
+    if (A.dir === p1Dir && B.dir !== p1Dir) {
+      reps.push({
+        phase1Duration: A.dur,
+        pause1Duration: (B.start - A.end) / 1000,
+        phase2Duration: B.dur,
+        pause2Duration: (i + 2 < phases.length) ? (phases[i + 2].start - B.end) / 1000 : null,
+        p1: A, p2: B
+      });
+      i++;
+    }
+  }
+  return {
+    gRef: gRef, sigma: sigma, thr: thr, peak: peak, phases: phases, holds: holds,
+    reps: reps, alternation: alternation, travelCV: travelCV, anchors: anchors.length,
+    sampleHz: hz, method: 'velocity', t: t, a: a, af: af, vel: vel, pos: pos
+  };
+}
+
 // The smoothing is chosen per set, not fixed in advance, for two reasons.
 //
 // First, alpha is a fraction PER SAMPLE, so a fixed value is a different filter on different
@@ -568,6 +793,16 @@ function segmentBest(samples, opts) {
   if (!samples || samples.length < 20) return segmentSet(samples, opts);
   const span = (samples[samples.length - 1].t - samples[0].t) / 1000;
   const hz = span > 0 ? samples.length / span : 60;
+
+  // Velocity first. It is the method that can see a steady stroke at all, so where it
+  // reads a set it is the better answer by a wide margin. It needs two pauses to pin its
+  // drift against, though, which a client who never stops at the top and bottom will not
+  // give it, and below that it has nothing to correct with. The acceleration ladder stays
+  // as the fallback for exactly that case: it reads a brisk continuous set, where strokes
+  // start and stop sharply enough to show as lobes, which is the one thing it is good at.
+  const vseg = segmentVelocity(samples, opts);
+  if (vseg.anchors >= 2 && vseg.reps.length >= 1) return vseg;
+
   let best = null;
   for (const fc of CUTOFF_LADDER) {
     const alpha = 1 - Math.exp(-2 * Math.PI * fc / hz);
@@ -575,7 +810,7 @@ function segmentBest(samples, opts) {
     // Over-smoothing wins on alternation by leaving almost nothing behind, so a candidate
     // must still show enough phases to be a set before its alternation counts.
     if (r.phases.length < 4) continue;
-    r.cutoffHz = fc; r.sampleHz = hz;
+    r.cutoffHz = fc; r.sampleHz = hz; r.method = 'acceleration'; r.travelCV = null;
     if (!best || r.alternation > best.alternation + 0.02 ||
         (Math.abs(r.alternation - best.alternation) <= 0.02 && r.reps.length > best.reps.length)) {
       best = r;
@@ -584,7 +819,7 @@ function segmentBest(samples, opts) {
   if (!best) {
     const alpha = 1 - Math.exp(-2 * Math.PI * 1.0 / hz);
     best = segmentSet(samples, Object.assign({}, opts, { alpha: alpha }));
-    best.cutoffHz = 1.0; best.sampleHz = hz;
+    best.cutoffHz = 1.0; best.sampleHz = hz; best.method = 'acceleration'; best.travelCV = null;
   }
   return best;
 }
@@ -696,6 +931,12 @@ function coachingFor(slots) {
   // Measured on simulated sets: at 3x the threshold phase times are exact, at 2.6x they
   // start to wander, and below 2x they are wrong without looking wrong.
   const SIGNAL_MARGINAL = 2.8, SIGNAL_UNUSABLE = 2.0;
+  // Spread of stroke travel across a set, above which the reconstruction is not to be
+  // trusted. Measured: 2% on the exact fixtures, 11% on a real freehand set, 15% on a
+  // fatiguing set whose range of motion genuinely shortens rep by rep, 93% on a set
+  // containing a stack clang. Fatigue is normal and must never be flagged, so the bar
+  // sits far above 15% and only catches corruption.
+  const TRAVEL_SPREAD_BAD = 0.40;
   const trendCanvas = $('trendCanvas'), trendCtx = trendCanvas.getContext('2d');
   const ringArc = $('ringArc'), ringCue = $('ringCue'), ringCount = $('ringCount'), ringRep = $('ringRep');
   const ringToggle = $('ringToggle');
@@ -1077,8 +1318,25 @@ function coachingFor(slots) {
     // off to fix something that was never broken.
     const ratio = seg.thr > 0 ? seg.peak / seg.thr : 0;
     const ups = seg.phases.filter(p => p.dir > 0).length;
+    // The signal-strength gates below belong to the acceleration method, which had to
+    // resolve individual lobes and so genuinely failed when they did not stand clear of the
+    // noise. The velocity method integrates, which averages noise down, and it reads sets
+    // cleanly at ratios the old gates would have condemned outright. Applying them here
+    // would tell a client their perfectly good set was unusable, so each is scoped to the
+    // method that earned it, and the velocity method gets the test that actually catches
+    // its failures: a stack has a fixed range of motion, so when stroke travel varies
+    // wildly the reconstruction has been corrupted by something other than lifting.
+    const velMethod = seg.method === 'velocity';
+    const spread = seg.travelCV;
     let note = null, noteBad = false;
-    if (seg.peak > 0 && ratio < SIGNAL_UNUSABLE) {
+    if (velMethod && spread != null && spread > TRAVEL_SPREAD_BAD) {
+      noteBad = true;
+      note = 'Could not read this set reliably: stroke travel varied by '
+        + (spread * 100).toFixed(0) + '%, where a stack moving through its fixed range should '
+        + 'repeat to within about 15%. Something other than the lift is in the signal — the '
+        + 'usual causes are the stack being dropped onto its own weight at the bottom, or the '
+        + 'phone moving in its cradle. Treat these phase times as unusable.';
+    } else if (!velMethod && seg.peak > 0 && ratio < SIGNAL_UNUSABLE) {
       noteBad = true;
       note = 'Signal too weak: peak ' + seg.peak.toFixed(4) + ' m/s² is only ' + ratio.toFixed(1)
         + '× the ' + seg.thr.toFixed(4) + ' threshold. Treat these phase times as unusable — a slow '
@@ -1089,7 +1347,8 @@ function coachingFor(slots) {
       note = 'Could not read this as reps. Of ' + seg.phases.length + ' movements detected, '
         + ups + ' read as one direction and ' + (seg.phases.length - ups) + ' as the other — real '
         + 'reps alternate, so direction was not resolved and no rep time here can be trusted. '
-        + 'Signal strength was not the problem (' + ratio.toFixed(1) + '× threshold). The usual '
+        + (velMethod ? '' : 'Signal strength was not the problem (' + ratio.toFixed(1) + '× threshold). ')
+        + 'The usual '
         + 'cause is travel that is not straight along gravity: sideways movement adds to the '
         + 'reading whichever way you are going, so it registers as one direction only. Mount the '
         + 'phone to something that can travel only up and down.';
@@ -1106,7 +1365,7 @@ function coachingFor(slots) {
     } else if (travelWarn) {
       noteBad = true;
       note = travelWarn;
-    } else if (seg.peak > 0 && ratio < SIGNAL_MARGINAL) {
+    } else if (!velMethod && seg.peak > 0 && ratio < SIGNAL_MARGINAL) {
       note = 'Signal marginal: peak ' + seg.peak.toFixed(4) + ' m/s² is only ' + ratio.toFixed(1)
         + '× the ' + seg.thr.toFixed(4) + ' threshold. Phase times may read short. Mount more '
         + 'rigidly, use a longer stroke, or lift to a quicker tempo.';
