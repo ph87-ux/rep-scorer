@@ -46,6 +46,15 @@
       "stackTravelMm": null,
       "targetTempo": null,
       "notes": "Bottom set to LOADED by the coached-hover policy. Small joint through a small range, so stack travel is likely to be the shortest in the estate — tape it and check the signal ratio before relying on this one. May only be viable at a quicker tempo."
+    },
+    {
+      "code": "B6",
+      "name": "Leg Press",
+      "topHold": "REST",
+      "bottomHold": "LOADED",
+      "stackTravelMm": null,
+      "targetTempo": null,
+      "notes": "First machine where the two ends differ. At the top the knees lock and the load passes through the skeleton, so holding there is rest however it is coached — the hover policy does not override it. At the bottom the knees are flexed and the quads hold the carriage, so the hover is work. Often geared 2:1 to keep the stack manageable, which would halve the travel the phone sees — worth taping."
     }
   ],
   "coaching": {
