@@ -8,26 +8,30 @@
   },
   "positions": {
     "top": "Stack raised. Always the end of the concentric and the muscle at its shortest, whichever way the client's limb travelled.",
-    "bottom": "Stack down. Start position, muscle at its longest. Note this one can follow the prescription rather than the machine: touching the plates down releases tension (REST), hovering just above keeps it (LOADED)."
+    "bottom": "Stack down. Start position, muscle at its longest. Coached as a HOVER throughout, so the plates stay off the stack and the muscle keeps holding the load — LOADED by default. Setting the plates down would release tension and make it REST."
   },
   "machines": [
     {
       "code": "B1",
       "name": "Leg Extension",
       "topHold": "LOADED",
-      "bottomHold": "REST",
+      "bottomHold": "LOADED",
       "stackTravelMm": null,
       "targetTempo": null,
-      "notes": "Knee cannot lock out and shed load to the skeleton, so the quad holds the leg against the pad through full extension. Bottom assumes the plates are set down; if coached to hover, bottom becomes LOADED."
+      "notes": "Knee cannot lock out and shed load to the skeleton, so the quad holds the leg against the pad through full extension. Bottom is a coached hover, so the quad keeps holding the load in the stretched position."
     },
     {
       "code": "B5",
       "name": "Leg Curl",
       "topHold": "LOADED",
-      "bottomHold": "REST",
+      "bottomHold": "LOADED",
       "stackTravelMm": null,
       "targetTempo": null,
-      "notes": "Hamstring holds the pad against resistance at full knee flexion, with no position the skeleton can take over. Bottom assumes the plates are set down; hovering would make it LOADED."
+      "notes": "Hamstring holds the pad against resistance at full knee flexion, with no position the skeleton can take over. Bottom is a coached hover, so the hamstring keeps holding the load in the stretched position."
     }
-  ]
+  ],
+  "coaching": {
+    "bottomPosition": "HOVER",
+    "note": "Clients are always coached to hover at the bottom rather than set the plates down. A hovered stack stays suspended, so the muscle is still holding it and the bottom hold is LOADED by default across the estate. A machine only overrides this if its own bottom position genuinely sheds the load."
+  }
 }
