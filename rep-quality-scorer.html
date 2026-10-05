@@ -1812,9 +1812,16 @@ function coachingFor(slots) {
     const rated = slots.filter(x => x.n);
     const score = rated.length ? rated.reduce((a, x) => a + x.score, 0) / rated.length : null;
 
+    // The signal-ratio check belongs to the acceleration method, as on screen. It asks
+    // whether acceleration lobes stand clear of the noise, which is not how the velocity
+    // method reads a set, and leaving it unscoped here would have stamped a perfectly good
+    // export with a failure the summary above it did not show.
+    const velMethod = s.method === 'velocity';
     const fails = [];
     if (!res.reps.length) fails.push('no reps detected');
-    if (ratio < SIGNAL_MARGINAL) fails.push('signal only ' + ratio.toFixed(1) + 'x threshold');
+    if (!velMethod && ratio < SIGNAL_MARGINAL) fails.push('signal only ' + ratio.toFixed(1) + 'x threshold');
+    if (velMethod && s.travelCV != null && s.travelCV > TRAVEL_SPREAD_BAD)
+      fails.push('stroke travel varied by ' + (s.travelCV * 100).toFixed(0) + '%');
     if (res.unreadable) fails.push('phase direction did not resolve');
     if (travelMatch !== null && travelMatch < 0.8)
       fails.push('concentric and eccentric travel disagree by '
@@ -1841,6 +1848,8 @@ function coachingFor(slots) {
       quality: {
         trustworthy: fails.length === 0,
         failedChecks: fails,
+        engine: s.method || 'acceleration',
+        strokeTravelSpreadPct: s.travelCV != null ? Math.round(s.travelCV * 100) : null,
         signalRatio: +ratio.toFixed(1),
         alternationPct: Math.round((s.alternation || 0) * 100),
         travelMatchPct: travelMatch !== null ? Math.round(travelMatch * 100) : null,
