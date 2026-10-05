@@ -37,6 +37,15 @@
       "stackTravelMm": null,
       "targetTempo": null,
       "notes": "Hamstring holds against resistance at full flexion. Bottom set to LOADED by the coached-hover policy — submitted as REST, which would only be right if this machine's bottom position sheds the load even when hovered. Confirm."
+    },
+    {
+      "code": "B8",
+      "name": "Tibialis Dorsi Flexion",
+      "topHold": "LOADED",
+      "bottomHold": "LOADED",
+      "stackTravelMm": null,
+      "targetTempo": null,
+      "notes": "Bottom set to LOADED by the coached-hover policy. Small joint through a small range, so stack travel is likely to be the shortest in the estate — tape it and check the signal ratio before relying on this one. May only be viable at a quicker tempo."
     }
   ],
   "coaching": {
