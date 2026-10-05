@@ -138,6 +138,10 @@
   details[open] .panel-summary { margin-bottom:14px; }
   details[open] .panel-summary::after { transform:rotate(-90deg); }
 
+  .trend-note { font-size:13px; line-height:1.45; margin-top:10px; font-weight:600; }
+  .trend-note.on { color:var(--blue); }
+  .trend-note.off { color:var(--warn); }
+
   .empty-note { color:var(--dim); font-size:14px; text-align:center; padding:18px 0; font-weight:500; }
   footer { text-align:center; font-size:11px; color:var(--dim); margin-top:22px; line-height:1.6; font-weight:500; }
 
@@ -162,7 +166,7 @@
 
   <header>
     <div>
-      <div class="brand">Prototype · build 04 Oct 06:35 UTC</div>
+      <div class="brand">Prototype · build 05 Oct 09:51 UTC</div>
       <h1>Rep Quality Scorer</h1>
     </div>
     <div class="status-row">
@@ -224,9 +228,10 @@
   </div>
 
   <div class="panel set-hide">
-    <div class="panel-title">Rep Trend</div>
-    <canvas id="trendCanvas" style="width:100%; height:150px; display:block; border-radius:12px; background:var(--bg);"></canvas>
-    <div style="font-size:11px;color:var(--dim);margin-top:8px;line-height:1.4;">Each faded line is one completed rep's acceleration through that rep, start to finish, stretched onto a common axis. The bright line is the average of the set — how tightly the faded lines hug it is the rep-to-rep consistency.</div>
+    <div class="panel-title">Target vs actual</div>
+    <canvas id="trendCanvas" style="width:100%; height:190px; display:block; border-radius:12px; background:var(--bg);"></canvas>
+    <div class="trend-note" id="trendNote"></div>
+    <div style="font-size:11px;color:var(--dim);margin-top:8px;line-height:1.4;">Stack position through the set. The dashed line is the tempo you prescribed; the solid line is what was lifted. They start together, so a rep that runs long pushes the solid line permanently right — the widening gap is fatigue accumulating.</div>
   </div>
 
   <div class="panel set-hide">
@@ -746,37 +751,115 @@ function coachingFor(slots) {
 
   // Every rep's acceleration shape laid over the same 0-100% axis, with their average
   // drawn bold: how tightly the faded lines hug it is the rep-to-rep consistency.
+  // Prescribed profile against what was actually lifted.
+  //
+  // Both curves are stack position over time: up through the concentric, flat through the
+  // hold, down through the eccentric, flat at the bottom. The target runs at the prescribed
+  // cadence from the first rep onward, so any rep that takes longer than asked pushes the
+  // actual trace permanently to the right — the drift accumulates and the gap between the two
+  // IS the fatigue. A per-rep table cannot show that, because each rep's error looks small
+  // until you see six of them stacked up.
+  //
+  // The actual curve is reconstructed from measured phase durations and travel rather than by
+  // integrating the whole recording. Integrating across 80 seconds accumulates sensor bias
+  // without bound, which is what made continuous velocity tracking unusable early on; phase
+  // durations and per-phase travel are both quantities this already measures reliably.
+  function buildProfile(segs) {
+    // segs: [{dur, from, to}] -> sampled points, flat where from === to
+    const pts = []; let t = 0;
+    pts.push({ t: 0, y: segs.length ? segs[0].from : 0 });
+    for (const s of segs) {
+      const steps = s.from === s.to ? 1 : 12;
+      for (let k = 1; k <= steps; k++) {
+        // eased, because a stroke starts and finishes at a standstill rather than cornering
+        const f = k / steps, e = 0.5 - 0.5 * Math.cos(Math.PI * f);
+        pts.push({ t: t + s.dur * f, y: s.from + (s.to - s.from) * e });
+      }
+      t += s.dur;
+    }
+    return pts;
+  }
+
   function drawTrend(res) {
     sizeCanvas();
     const rect = trendCanvas.getBoundingClientRect(), w = rect.width, h = rect.height;
     trendCtx.clearRect(0, 0, w, h);
-    trendCtx.strokeStyle = '#D8D8DE'; trendCtx.lineWidth = 1;
-    trendCtx.beginPath(); trendCtx.moveTo(0, h / 2); trendCtx.lineTo(w, h / 2); trendCtx.stroke();
-    if (!res || !res.seg || !res.reps.length) return;
+    const PAD_L = 8, PAD_R = 8, PAD_T = 16, PAD_B = 18;
+    if (!res || !res.reps.length) {
+      trendCtx.strokeStyle = '#D8D8DE'; trendCtx.lineWidth = 1;
+      trendCtx.beginPath(); trendCtx.moveTo(0, h - PAD_B); trendCtx.lineTo(w, h - PAD_B); trendCtx.stroke();
+      return;
+    }
+    const t = res.targets, reps = res.reps;
 
-    const seg = res.seg, N = 48;
-    const traces = res.reps.map(r => {
-      const i0 = r.p1.startI, i1 = r.p2.endI, out = new Array(N);
-      for (let k = 0; k < N; k++) out[k] = seg.af[Math.round(i0 + (i1 - i0) * k / (N - 1))] || 0;
-      return out;
+    // target: the prescribed cycle repeated for as many reps as were performed
+    const tgtSegs = [];
+    for (let i = 0; i < reps.length; i++) {
+      tgtSegs.push({ dur: t.conc, from: 0, to: 1 });
+      if (t.top > 0) tgtSegs.push({ dur: t.top, from: 1, to: 1 });
+      tgtSegs.push({ dur: t.ecc, from: 1, to: 0 });
+      if (t.btm > 0 && i < reps.length - 1) tgtSegs.push({ dur: t.btm, from: 0, to: 0 });
+    }
+
+    // actual: measured durations, with height scaled by measured travel so a rep that stops
+    // short of full range reads as a lower peak rather than silently looking identical
+    let maxTravel = 0;
+    reps.forEach(r => { maxTravel = Math.max(maxTravel, r.concTravel || 0, r.eccTravel || 0); });
+    const actSegs = []; let prevTop = 0;
+    reps.forEach((r, i) => {
+      const peak = maxTravel ? Math.min(1, (r.concTravel || maxTravel) / maxTravel) : 1;
+      actSegs.push({ dur: r.concentric, from: prevTop, to: peak });
+      if (r.topPause) actSegs.push({ dur: r.topPause, from: peak, to: peak });
+      const base = maxTravel && r.eccTravel ? Math.max(0, peak - r.eccTravel / maxTravel) : 0;
+      actSegs.push({ dur: r.eccentric, from: peak, to: base });
+      if (r.bottomPause && i < reps.length - 1) actSegs.push({ dur: r.bottomPause, from: base, to: base });
+      prevTop = base;
     });
-    let maxAbs = 0.01;
-    for (const tr of traces) for (const v of tr) maxAbs = Math.max(maxAbs, Math.abs(v));
-    maxAbs *= 1.15;
-    const xAt = k => (k / (N - 1)) * w, yAt = v => h / 2 - (v / maxAbs) * (h / 2 - 6);
-    const line = (tr, style, lw) => {
-      trendCtx.strokeStyle = style; trendCtx.lineWidth = lw; trendCtx.beginPath();
-      tr.forEach((v, k) => { const x = xAt(k), y = yAt(v); k ? trendCtx.lineTo(x, y) : trendCtx.moveTo(x, y); });
-      trendCtx.stroke();
-    };
-    traces.forEach(tr => line(tr, 'rgba(21,101,192,0.20)', 1.5));
-    const avg = new Array(N).fill(0);
-    traces.forEach(tr => tr.forEach((v, k) => avg[k] += v / traces.length));
-    line(avg, '#1565C0', 3);
+
+    const tgt = buildProfile(tgtSegs), act = buildProfile(actSegs);
+    const tMax = Math.max(tgt[tgt.length - 1].t, act[act.length - 1].t) || 1;
+    const X = s => PAD_L + (s / tMax) * (w - PAD_L - PAD_R);
+    const Y = y => (h - PAD_B) - y * (h - PAD_T - PAD_B);
+
+    const path = pts => { trendCtx.beginPath();
+      pts.forEach((p, i) => { const x = X(p.t), y = Y(p.y); i ? trendCtx.lineTo(x, y) : trendCtx.moveTo(x, y); }); };
+
+    // baseline
+    trendCtx.strokeStyle = '#E3E3E8'; trendCtx.lineWidth = 1;
+    trendCtx.beginPath(); trendCtx.moveTo(0, h - PAD_B); trendCtx.lineTo(w, h - PAD_B); trendCtx.stroke();
+
+    // target stencil: dashed and grey, because it is the reference, not the measurement
+    trendCtx.setLineDash([4, 4]); trendCtx.strokeStyle = '#B9B9C2'; trendCtx.lineWidth = 2;
+    path(tgt); trendCtx.stroke(); trendCtx.setLineDash([]);
+
+    // actual
+    trendCtx.strokeStyle = '#1565C0'; trendCtx.lineWidth = 2.6; trendCtx.lineJoin = 'round';
+    path(act); trendCtx.stroke();
+
+    trendCtx.font = '600 10px -apple-system, sans-serif';
+    trendCtx.fillStyle = '#B9B9C2'; trendCtx.fillText('target', PAD_L, 11);
+    const tw = trendCtx.measureText('target').width;
+    trendCtx.fillStyle = '#1565C0'; trendCtx.fillText('actual', PAD_L + tw + 10, 11);
     trendCtx.fillStyle = '#8A8A8E'; trendCtx.font = '10px -apple-system, sans-serif';
-    trendCtx.fillText('+' + maxAbs.toFixed(3) + ' m/s²', 4, 10);
-    trendCtx.fillText('-' + maxAbs.toFixed(3) + ' m/s²', 4, h - 4);
-    trendCtx.fillText(res.reps.length + (res.reps.length === 1 ? ' rep' : ' reps'), w - 44, 10);
+    const lbl = tMax.toFixed(0) + 's';
+    trendCtx.fillText(lbl, w - PAD_R - trendCtx.measureText(lbl).width, h - 5);
+    trendCtx.fillText('0', PAD_L, h - 5);
+
+    // The headline the picture is making: how far behind or ahead the set finished.
+    const drift = act[act.length - 1].t - tgt[tgt.length - 1].t;
+    const el = $('trendNote');
+    if (el) {
+      if (Math.abs(drift) < 1) {
+        el.textContent = 'Held the prescribed cadence across all '
+          + reps.length + ' reps — the two traces stay together.';
+        el.className = 'trend-note on';
+      } else {
+        el.textContent = 'By the end of the set you were ' + Math.abs(drift).toFixed(1) + 's '
+          + (drift > 0 ? 'behind' : 'ahead of') + ' the prescribed cadence. The gap between the '
+          + 'traces is where each rep drifted from what was asked.';
+        el.className = 'trend-note off';
+      }
+    }
   }
 
   // One entry per movement phase, averaged across the set. A pause the segmenter could not
