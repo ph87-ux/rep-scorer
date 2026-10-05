@@ -92,10 +92,29 @@
       "stackTravelMm": null,
       "targetTempo": null,
       "notes": "Same rules as B6 Leg Press: elbows lock out at the top and the load passes through the skeleton, so the hold there is rest however it is coached. Bottom is a coached hover and stays loaded. One physical machine with two grips, recorded as separate codes so each keys cleanly and can carry its own travel. Grip-to-code mapping taken as front=E3, rear=E1 — swap if that is the wrong way round."
+    },
+    {
+      "code": "C7",
+      "name": "Row",
+      "topHold": "LOADED",
+      "bottomHold": "LOADED",
+      "stackTravelMm": null,
+      "targetTempo": null,
+      "notes": "Multi-joint but a PULL, so there is no lockout: at the contracted end the back is holding the handle in against the stack and relaxing sends it straight back. LOADED by the test in this file, despite sharing a joint count with the pressing machines. Proposed rather than submitted — confirm. Often geared 2:1, which would halve the travel the phone sees."
+    },
+    {
+      "code": "C3",
+      "name": "Pulldown",
+      "topHold": "LOADED",
+      "bottomHold": "LOADED",
+      "stackTravelMm": null,
+      "targetTempo": null,
+      "notes": "Multi-joint but a PULL, so there is no lockout: at the contracted end the back is holding the handle in against the stack and relaxing sends it straight back. LOADED by the test in this file, despite sharing a joint count with the pressing machines. Proposed rather than submitted — confirm. Often geared 2:1, which would halve the travel the phone sees."
     }
   ],
   "coaching": {
     "bottomPosition": "HOVER",
     "note": "Clients are always coached to hover at the bottom rather than set the plates down. A hovered stack stays suspended, so the muscle is still holding it and the bottom hold is LOADED by default across the estate. A machine only overrides this if its own bottom position genuinely sheds the load."
-  }
+  },
+  "notes": "The divide is push versus pull, not single-joint versus multi-joint. Pressing movements lock out and the skeleton takes the load, so their top hold is REST. Pulling movements have no lockout and the muscle holds throughout, so their top hold is LOADED however many joints are involved."
 }
