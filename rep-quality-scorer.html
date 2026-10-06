@@ -209,7 +209,7 @@
 
   <header>
     <div>
-      <div class="brand">Prototype · velocity engine · build 06 Oct 03:44 UTC</div>
+      <div class="brand">Prototype · velocity engine · build 06 Oct 08:06 UTC</div>
       <h1>Rep Quality Scorer</h1>
     </div>
     <div class="status-row">
@@ -621,7 +621,20 @@ function segmentSet(samples, opts) {
 // slower than target, so the method is least accurate exactly where accuracy matters least.
 const STRUCT_HP = 0.05;   // Hz, pass 1: robust structure finding
 const MEAS_HP   = 0.015;  // Hz, pass 2: preserves the stroke, drift handled by pinning
-const ACC_FC    = 1.2;    // Hz, de-noise acceleration before integrating
+// Hz, de-noise acceleration before integrating. A 4s stroke carries its energy at 0.125Hz
+// and the fastest stroke worth reading — a rushed 2s one — at 0.25Hz, so this only has to
+// clear 0.25Hz by a comfortable margin; everything above is vibration passed straight
+// through. Lowering it from 1.2 to 0.9 leaves measurably less of that behind — the share of
+// filtered energy that is actually lifting rises from 36-58% to 43-62% across real
+// recordings — at a cost under 0.1s on a known 4-2-4-2.
+//
+// It does not go lower, because the gain stops being free: a low-pass rounds the start and
+// end of a stroke as well as rejecting noise, so at 0.6Hz strokes read 0.3s long and holds
+// 0.35s short, and at 0.45Hz it is 0.6s either way — worse than the noise removed. Nor does
+// filtering rescue a bad machine: on two stacks whose sets were unreadable, dropping to
+// 0.3Hz left travel varying by 73% and 296%, against 50% and 325% at 1.2Hz. Those sets
+// failed for want of signal, and no filter adds signal.
+const ACC_FC    = 0.9;
 const COARSE_FRAC = 0.18; // pass 1 move threshold, as a fraction of typical peak speed
 const FINE_FRAC   = 0.05; // pass 2 move threshold
 const MIN_MOVE_S  = 0.35; // shortest credible stroke
