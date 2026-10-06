@@ -1006,7 +1006,7 @@ function coachingFor(slots) {
   // start. Pressing Stop still works and is always quicker.
   const AUTO_STOP_MS = 12000, AUTO_WARN_MS = 7000;
   const STILL_CEILING = 0.12;   // m/s^2 — above this it is moving, whatever the noise estimate says
-  let lastMotionT = 0, sawMotion = false;
+  let lastMotionT = 0, lastMoveAnyT = 0, sawMotion = false;
 
   // The set does not begin when the button is pressed. A client has to cradle the phone, hit
   // start, then get seated and take hold — easily fifteen or twenty seconds, during which the
@@ -1622,8 +1622,30 @@ function coachingFor(slots) {
       // and the set reads as "still" and starts early. A rigidly mounted phone at rest never
       // produces a mean deviation anywhere near this ceiling, so capping the stillness test
       // only bites when the window is far too noisy to be a resting stack.
+      // Two motion tests, because settling and auto-stopping want opposite things.
+      //
+      // Settling asks "is the stack at rest yet", and wants to tolerate the small wander a
+      // resting stack always shows — too strict and the set never starts at all. The
+      // deviation test is right for that, and is what it was built for.
+      //
+      // Auto-stop asks "has the stack stopped moving", and must not be fooled by a steady
+      // stroke. The deviation test is blind to one, for the same reason the bar above was:
+      // over its own short window the baseline follows the stroke. That blind spot reaches
+      // furthest here, because this arms auto-stop — so on a slow set the app decided the
+      // stack had been motionless for twelve seconds while the client was still lifting and
+      // ended the set under them, demonstrably at rep three of a 6s tempo.
+      //
+      // So auto-stop takes the union of both tests and settling keeps the deviation one.
+      // Combining them into a single timer was tried and breaks starting: the union is more
+      // willing to call noise movement, so stillness never accumulates and the set never
+      // begins. A set that fails to stop itself is an inconvenience; one that stops mid-lift
+      // is lost work, and one that never starts is worse than both.
       const stillThr = Math.min(thr * 1.4, STILL_CEILING);
-      if (dev > stillThr) { lastMotionT = now; if (setBegun) sawMotion = true; }
+      if (dev > stillThr) { lastMotionT = now; }
+      if (dev > stillThr || speed >= TRIP_MIN_SPEED) {
+        lastMoveAnyT = now;
+        if (setBegun) sawMotion = true;
+      }
     }
     const stillFor = now - lastMotionT;
 
@@ -1687,7 +1709,7 @@ function coachingFor(slots) {
       }
     }
 
-    const still = sawMotion ? now - lastMotionT : 0;
+    const still = sawMotion ? now - lastMoveAnyT : 0;
     if (sawMotion && still >= AUTO_STOP_MS) { finishSet(); return; }
     const ending = (sawMotion && still >= AUTO_WARN_MS)
       ? 'ENDING IN ' + Math.ceil((AUTO_STOP_MS - still) / 1000) : null;
@@ -1751,7 +1773,7 @@ function coachingFor(slots) {
     armed = true; setBegun = false; trimFromT = 0;
     settled = false; settledAtT = 0; tripX = 0; tripLastT = 0; moveStartT = 0;
     liveG = 0; liveV = 0; liveLastT = 0;
-    lastMotionT = setStartT; sawMotion = false;
+    lastMotionT = setStartT; lastMoveAnyT = setStartT; sawMotion = false;
     // The analysis needs a second or two of stillness to measure gravity and the noise floor,
     // so the ring holds the client at the start rather than launching straight into rep one.
     ringStart = 0;   // set once the client has settled, not from the button press
