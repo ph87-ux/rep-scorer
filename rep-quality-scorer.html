@@ -1051,7 +1051,8 @@ function coachingFor(slots) {
   // right way to fail: those are already past the point where phase times can be trusted.
   const TRIP_MIN_SPEED = 0.013;   // m/s
   let armed = false, setBegun = false, trimFromT = 0;
-  let settled = false, settledAtT = 0, gSettle = 0, tripV = 0, tripX = 0, tripLastT = 0, moveStartT = 0;
+  let settled = false, settledAtT = 0, tripX = 0, tripLastT = 0, moveStartT = 0;
+  let liveG = 0, liveV = 0, liveLastT = 0;
 
   // A 10-rep set at a 4s tempo is two minutes with nobody touching the screen, so iOS
   // auto-lock fires partway through and the motion events simply stop — the set comes back
@@ -1571,14 +1572,39 @@ function coachingFor(slots) {
     // auto-stop silently dead on exactly the machines where reaching for Stop is hardest.
     const recent = samples.slice(-25).map(s => s.mag);
     let thr = 0.02;
+
+    // Live speed of the stack, by the same leaky integration the start gate uses. It runs for
+    // the whole set, not just while arming, because the movement bar needs it too.
+    //
+    // That bar used to be driven by the peak deviation from a median of the last 0.4s, which
+    // cannot see a slow stroke: over a window that short the median tracks the stroke itself,
+    // so what is left is noise. The bar therefore flickered at the slowest tempo — which is
+    // the best-controlled lifting, the case the product exists to reward — and the same
+    // quantity set the bar's colour and the signal ok/weak text, so a client lifting well was
+    // told their signal was weak. It is the third place the same blind spot has shown up,
+    // after the segmenter and the start gate, and the cure is the same: measure speed.
+    if (samples.length) {
+      const dtL = Math.min(0.1, liveLastT ? (now - liveLastT) / 1000 : 0);
+      liveLastT = now;
+      const magNow = samples[samples.length - 1].mag;
+      if (!liveG) liveG = magNow;
+      if (dtL > 0) {
+        liveG += (magNow - liveG) * Math.min(1, dtL / TRIP_TAU_G);
+        liveV = (liveV + (magNow - liveG) * dtL) * Math.exp(-dtL / TRIP_TAU_V);
+      }
+    }
+    const speed = Math.abs(liveV);
+
     if (recent.length > 8) {
       const g = median(recent), pk = Math.max.apply(null, recent.map(m => Math.abs(m - g)));
-      liveMax = Math.max(liveMax, pk);
+      liveMax = Math.max(liveMax, speed);
       thr = Math.max(0.012, 3 * robustSigma(samples.slice(-200).map(s => s.mag)) * 0.29);
-      const frac = Math.min(1, pk / (thr * 4));
+      // Full scale at eight times the speed that counts as movement, so the shortest machine
+      // worth measuring still swings the bar a quarter of the way across.
+      const frac = Math.min(1, speed / (TRIP_MIN_SPEED * 8));
       tempoFill.style.width = (frac * 100) + '%';
-      tempoFill.className = 'tempo-fill' + (pk > thr ? '' : ' pause');
-      signalText.textContent = liveMax > thr * 1.5 ? 'signal ok' : 'signal weak';
+      tempoFill.className = 'tempo-fill' + (speed >= TRIP_MIN_SPEED ? '' : ' pause');
+      signalText.textContent = liveMax >= TRIP_MIN_SPEED * 1.5 ? 'signal ok' : 'signal weak';
       // Stillness is judged on the MEAN deviation, not the peak. The peak of 25 noise samples
       // sits around 2.5 sigma, which clears the threshold on its own, so a peak test calls a
       // motionless stack "moving" and the timer never accumulates. The mean is about 0.8
@@ -1608,29 +1634,23 @@ function coachingFor(slots) {
       if (!settled) {
         if (stillFor >= SETTLE_MS && samples.length > 30) {
           settled = true; settledAtT = now;
-          gSettle = median(samples.slice(-60).map(s => s.mag));
-          tripV = 0; tripX = 0; tripLastT = now; moveStartT = now;
+          tripX = 0; tripLastT = now; moveStartT = now;
         }
       } else if (samples.length) {
         // Distance travelled recently, as path length rather than net displacement, so a
-        // stroke and the stroke back do not cancel.
+        // stroke and the stroke back do not cancel. The speed comes from the one live
+        // estimate above rather than a second copy of the same filter, so the bar the client
+        // watches and the gate that starts the set can never disagree about what is moving.
         //
-        // Two things keep this honest over the minute a client may take to get going. The
-        // acceleration is measured against a slowly-tracking gravity estimate rather than a
-        // fixed one, which removes the constant error that would otherwise integrate into a
-        // runaway ramp — a 3mm/s^2 error in a fixed reference reaches the gate on its own in
-        // about five seconds. And both integrals leak, so noise accumulates to a bounded
-        // wander instead of a random walk that trips given long enough. The cost is that
-        // very slow movement is under-counted, which is the right way to be wrong here: the
-        // gate exists to ignore a stack that is creeping.
+        // The travel integral leaks for the same reason the speed one does: over the minute
+        // a client may take to get going, noise would otherwise random-walk past any fixed
+        // gate. The cost is that very slow movement is under-counted, which is the right way
+        // to be wrong here, since the gate exists to ignore a stack that is creeping.
         const dt = Math.min(0.1, (now - tripLastT) / 1000);
         tripLastT = now;
         if (dt > 0) {
-          const mag = samples[samples.length - 1].mag;
-          gSettle += (mag - gSettle) * Math.min(1, dt / TRIP_TAU_G);
-          tripV = (tripV + (mag - gSettle) * dt) * Math.exp(-dt / TRIP_TAU_V);
           tripX = tripX * Math.exp(-dt / TRIP_TAU_X)
-                + (Math.abs(tripV) >= TRIP_MIN_SPEED ? Math.abs(tripV) * dt : 0);
+                + (speed >= TRIP_MIN_SPEED ? speed * dt : 0);
           if (!moving) moveStartT = now;
         }
         if (Math.abs(tripX) * 1000 >= TRIP_MM) {
@@ -1729,7 +1749,8 @@ function coachingFor(slots) {
     samples = []; liveMax = 0; lastResult = null;
     setStartT = performance.now(); recording = true;
     armed = true; setBegun = false; trimFromT = 0;
-    settled = false; settledAtT = 0; gSettle = 0; tripV = 0; tripX = 0; tripLastT = 0; moveStartT = 0;
+    settled = false; settledAtT = 0; tripX = 0; tripLastT = 0; moveStartT = 0;
+    liveG = 0; liveV = 0; liveLastT = 0;
     lastMotionT = setStartT; sawMotion = false;
     // The analysis needs a second or two of stillness to measure gravity and the noise floor,
     // so the ring holds the client at the start rather than launching straight into rep one.
