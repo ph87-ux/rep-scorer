@@ -209,7 +209,7 @@
 
   <header>
     <div>
-      <div class="brand">Prototype · velocity engine · build 06 Oct 01:44 UTC</div>
+      <div class="brand">Prototype · velocity engine · build 06 Oct 03:44 UTC</div>
       <h1>Rep Quality Scorer</h1>
     </div>
     <div class="status-row">
@@ -1780,6 +1780,22 @@ function coachingFor(slots) {
     const inIframe = (function(){ try { return window.self !== window.top; } catch(e) { return true; } })();
     if (inIframe) { showError('This page is running inside an embedded preview (an iframe), which iOS blocks from requesting Motion & Fitness access. Open it directly in Safari as its own tab and try again.'); return; }
     if (window.isSecureContext !== true) { showError('This page isn\'t loaded over https, which iOS requires for motion sensors. Open it as a real https:// page in Safari.'); return; }
+    // On iOS the motion permission prompt is Safari's. Chrome, Firefox and Edge there are
+    // WebKit underneath but do not carry it, so the request is refused without ever asking,
+    // and the Settings toggle the refusal points at governs Safari rather than them. Saying
+    // "denied, change your Safari setting" to someone in Chrome sends them to a switch that
+    // cannot help, so name the real cause instead. Detected by the browser's own UA tag —
+    // CriOS, FxiOS, EdgiOS — which is the only thing that distinguishes them on iOS.
+    const iosOther = /CriOS|FxiOS|EdgiOS|OPT\//.test(navigator.userAgent);
+    if (iosOther) {
+      const which = /CriOS/.test(navigator.userAgent) ? 'Chrome'
+                  : /FxiOS/.test(navigator.userAgent) ? 'Firefox'
+                  : /EdgiOS/.test(navigator.userAgent) ? 'Edge' : 'this browser';
+      showError('Motion sensors are only available in Safari on iPhone — ' + which + ' is not given '
+        + 'access to them, whatever the Settings show. Open this page in Safari: tap the browser '
+        + 'menu and choose Open in Safari, or paste the address into Safari directly.');
+      return;
+    }
     const needs = typeof DeviceMotionEvent !== 'undefined' && typeof DeviceMotionEvent.requestPermission === 'function';
     function goLive() {
       sensorsReady = true;
@@ -1790,7 +1806,9 @@ function coachingFor(slots) {
     if (needs) {
       DeviceMotionEvent.requestPermission().then(function(r) {
         if (r === 'granted') goLive();
-        else showError('Motion access denied. Enable it in Settings → Safari → Motion & Orientation Access, then reload.');
+        else showError('Motion access denied. Turn on Settings → Safari → Motion & Orientation Access '
+          + '(Settings → Apps → Safari on iOS 18), then reload this page. If it is already on, the '
+          + 'refusal was remembered from a previous visit: toggle it off and back on, then reload.');
       }).catch(function(err){ showError('Could not request motion access: ' + err.message); });
     } else if (typeof DeviceMotionEvent !== 'undefined') goLive();
     else showError('This browser does not support motion sensors, or they are unavailable here.');
