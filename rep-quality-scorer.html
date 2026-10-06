@@ -1029,7 +1029,7 @@ function coachingFor(slots) {
   // integration is thrown away and restarted every time stillness returns, so drift never has
   // time to accumulate. It is the same well-posed problem as per-phase travel, for the same
   // reason.
-  const TRIP_MM = 25;        // travel that distinguishes a real first stroke from the stack creeping
+  const TRIP_MM = 20;        // travel that distinguishes a real first stroke from the stack creeping
   const TRIP_TAU_G = 4.0;    // s, how fast the gravity reference re-tracks (kills constant error)
   const TRIP_TAU_V = 3.0;    // s, velocity leak
   const TRIP_TAU_X = 6.0;    // s, travel leak
@@ -1049,7 +1049,7 @@ function coachingFor(slots) {
   // 25mm gate therefore sits six times above the noise and still trips the shortest machine
   // worth measuring. A machine with a stroke much under 100mm will not trip it, which is the
   // right way to fail: those are already past the point where phase times can be trusted.
-  const TRIP_MIN_SPEED = 0.013;   // m/s
+  const TRIP_MIN_SPEED = 0.011;   // m/s
   // ...and it has to hold that speed, not merely touch it. Noise out of the integrator peaks
   // around 12mm/s at the 60Hz a phone reports, which is close enough to the floor that a
   // client who settles and then waits before lifting accumulates travel from stray
@@ -1058,6 +1058,29 @@ function coachingFor(slots) {
   // be sustained separates them on duration, which noise cannot fake, instead of on a margin
   // that noise can wander across.
   const TRIP_SUSTAIN_MS = 300;
+  //
+  // These three were settled by measuring the false-start rate over thousands of simulated
+  // starts rather than by watching single runs. A browser-driven test takes two minutes to
+  // produce one noisy sample, and two such runs disagreed about whether a creeping bar
+  // started the set while feeding it exactly the same creep — the outcome was being decided
+  // by noise, not by the parameters, and no amount of watching single runs would have shown
+  // that. Measured at the 60Hz a phone reports, settling and then waiting before lifting:
+  //
+  //                        false start      starts on a real first rep
+  //                   firm mount  loose     100mm/4s  150mm/4s  300mm/4s
+  //   13 / 25 / 0ms        5.5%   48.3%         100%      100%      100%
+  //   13 / 25 / 300ms      0.0%    0.5%          32%      100%      100%
+  //   11 / 20 / 300ms      0.0%    1.2%          98%      100%      100%
+  //
+  // The sustain requirement alone cured the false starts and cost the shortest machines
+  // their start, which is why the floor and gate came down with it. On a loose mount the
+  // false rate grows with how long the client waits — 0.35% after five seconds, 2.6% after a
+  // minute — so a stack that will not sit still is still worth mounting firmly.
+  //
+  // The one case this cannot do is a SHORT stroke at a SLOW tempo: 100mm at 6s starts only a
+  // fifth of the time, against 98% at 4s and 98% for 150mm at 6s. Speed is what separates a
+  // rep from a creep, and that case has the least of it. It is the honest edge of the
+  // method rather than a setting left untuned.
   let armed = false, setBegun = false, trimFromT = 0;
   let settled = false, settledAtT = 0, tripX = 0, tripLastT = 0, moveStartT = 0, fastSinceT = 0;
   let liveG = 0, liveV = 0, liveLastT = 0;
