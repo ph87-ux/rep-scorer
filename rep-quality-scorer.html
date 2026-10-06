@@ -209,7 +209,7 @@
 
   <header>
     <div>
-      <div class="brand">Prototype · velocity engine · build 06 Oct 08:06 UTC</div>
+      <div class="brand">Prototype · velocity engine · build 06 Oct 08:22 UTC</div>
       <h1>Rep Quality Scorer</h1>
     </div>
     <div class="status-row">
@@ -708,7 +708,29 @@ function segmentVelocity(samples, opts) {
   const gRef = o.gRef != null ? o.gRef : median(mag.filter((_, i) => t[i] - t[0] < 3000));
   const a = mag.map(m => m - gRef);
   const sigma = robustSigma(mag);
-  const af = filtfiltHz(a, o.accFc, hz);
+
+  // Impulses are clipped before anything else sees them. A stack dropped onto its own
+  // weight produces a spike that is brief and enormous — 15 m/s^2 on a seated row, against
+  // a median deviation of 0.23 for that same set — and integrating one twice turns a few
+  // milliseconds of impact into hundreds of millimetres of travel that never happened. That
+  // set reported a 583mm concentric against a 339mm eccentric, on a stack of about 220mm.
+  //
+  // Lifting is sustained and modest where an impact is brief and huge, so clipping at a
+  // robust multiple of the set's own scale removes the second and leaves the first alone.
+  // At eight times the median deviation that set's stroke-travel spread falls from 243% to
+  // 59%, while three sets of known-good lifting and two fixtures with exact ground truth do
+  // not move at all. Five times would reach 31%, but by then it is shaving real strokes: a
+  // validated set shifts by a third of a second, a worse error than the one being fixed.
+  //
+  // The acceleration engine capped its reference for this reason, added after a simulated
+  // clang cost half a set. Rebuilding around velocity dropped that protection and nothing
+  // replaced it, which went unnoticed until a real stack was slammed hard enough to show it.
+  const CLIP_K = 8;
+  const devSorted = a.map(Math.abs).sort((x, y) => x - y);
+  const clipLim = Math.max((devSorted[devSorted.length >> 1] || 0.01) * CLIP_K, 0.15);
+  const aClipped = a.map(v => v > clipLim ? clipLim : (v < -clipLim ? -clipLim : v));
+
+  const af = filtfiltHz(aClipped, o.accFc, hz);
   const peak = af.length ? Math.max.apply(null, af.map(Math.abs)) : 0;
   const thr = Math.max(sigma * 0.29 * 3, 0.012);
 
