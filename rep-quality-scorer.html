@@ -209,7 +209,7 @@
 
   <header>
     <div>
-      <div class="brand">Prototype · velocity engine · build 06 Oct 08:27 UTC</div>
+      <div class="brand">Prototype · velocity engine · build 06 Oct 08:29 UTC</div>
       <h1>Rep Quality Scorer</h1>
     </div>
     <div class="status-row">
@@ -1031,6 +1031,18 @@ function coachingFor(slots) {
   // containing a stack clang. Fatigue is normal and must never be flagged, so the bar
   // sits far above 15% and only catches corruption.
   const TRAVEL_SPREAD_BAD = 0.40;
+  // How far the stack must actually move for a phase time to mean anything. The spread check
+  // above asks whether the reps agree with each other, which a client doing consistently tiny
+  // reps passes easily while every number about them is noise — so this asks the separate
+  // question of whether there was enough movement to measure at all.
+  //
+  // Travel is not a fixed property of a machine. On anything with an adjustable seat it
+  // depends on where the client sits and how far they personally move, so it cannot be
+  // settled once per machine and has to be checked on every set. Measured at the noise of a
+  // real rigid mount, a 4s stroke carries 0.06s of error at 300mm, 0.12s at 200mm, 0.23s at
+  // 100mm, 0.38s at 70mm and 0.67s at 50mm. Against a 4s target the first three are inside
+  // the scoring grace band and the last two are not.
+  const TRAVEL_MIN_MM = 100, TRAVEL_MARGINAL_MM = 150;
   const trendCanvas = $('trendCanvas'), trendCtx = trendCanvas.getContext('2d');
   const ringArc = $('ringArc'), ringCue = $('ringCue'), ringCount = $('ringCount'), ringRep = $('ringRep');
   const ringToggle = $('ringToggle');
@@ -1492,7 +1504,18 @@ function coachingFor(slots) {
     const velMethod = seg.method === 'velocity';
     const spread = seg.travelCV;
     let note = null, noteBad = false;
-    if (velMethod && spread != null && spread > TRAVEL_SPREAD_BAD) {
+    const medTravel = (function () {
+      const v = (seg.phases || []).map(p => p.travel).filter(x => x > 0).sort((a, b) => a - b);
+      return v.length ? v[v.length >> 1] * 1000 : null;
+    })();
+    if (velMethod && medTravel != null && medTravel < TRAVEL_MIN_MM) {
+      noteBad = true;
+      note = 'The stack only moved about ' + medTravel.toFixed(0) + 'mm per rep, which is too '
+        + 'little to time reliably — below roughly ' + TRAVEL_MIN_MM + 'mm the phase times '
+        + 'carry more error than the scoring allows. Either this machine moves the stack very '
+        + 'little, or the seat is set so the client works through a short range. Reps and time '
+        + 'under tension still stand; the phase times do not.';
+    } else if (velMethod && spread != null && spread > TRAVEL_SPREAD_BAD) {
       noteBad = true;
       note = 'Could not read this set reliably: stroke travel varied by '
         + (spread * 100).toFixed(0) + '%, where a stack moving through its fixed range should '
@@ -2058,6 +2081,12 @@ function coachingFor(slots) {
     const fails = [];
     if (!res.reps.length) fails.push('no reps detected');
     if (!velMethod && ratio < SIGNAL_MARGINAL) fails.push('signal only ' + ratio.toFixed(1) + 'x threshold');
+    const mt = (function () {
+      const v = (s.phases || []).map(p => p.travel).filter(x => x > 0).sort((a, b) => a - b);
+      return v.length ? v[v.length >> 1] * 1000 : null;
+    })();
+    if (velMethod && mt != null && mt < TRAVEL_MIN_MM)
+      fails.push('stack moved only ' + mt.toFixed(0) + 'mm per rep');
     if (velMethod && s.travelCV != null && s.travelCV > TRAVEL_SPREAD_BAD)
       fails.push('stroke travel varied by ' + (s.travelCV * 100).toFixed(0) + '%');
     if (res.unreadable) fails.push('phase direction did not resolve');
