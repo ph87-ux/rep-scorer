@@ -1050,8 +1050,16 @@ function coachingFor(slots) {
   // worth measuring. A machine with a stroke much under 100mm will not trip it, which is the
   // right way to fail: those are already past the point where phase times can be trusted.
   const TRIP_MIN_SPEED = 0.013;   // m/s
+  // ...and it has to hold that speed, not merely touch it. Noise out of the integrator peaks
+  // around 12mm/s at the 60Hz a phone reports, which is close enough to the floor that a
+  // client who settles and then waits before lifting accumulates travel from stray
+  // excursions alone and the set starts under them — the very fault this gate exists to fix.
+  // Those excursions last a few samples; a stroke holds for seconds. Requiring the speed to
+  // be sustained separates them on duration, which noise cannot fake, instead of on a margin
+  // that noise can wander across.
+  const TRIP_SUSTAIN_MS = 300;
   let armed = false, setBegun = false, trimFromT = 0;
-  let settled = false, settledAtT = 0, tripX = 0, tripLastT = 0, moveStartT = 0;
+  let settled = false, settledAtT = 0, tripX = 0, tripLastT = 0, moveStartT = 0, fastSinceT = 0;
   let liveG = 0, liveV = 0, liveLastT = 0;
 
   // A 10-rep set at a 4s tempo is two minutes with nobody touching the screen, so iOS
@@ -1671,8 +1679,10 @@ function coachingFor(slots) {
         const dt = Math.min(0.1, (now - tripLastT) / 1000);
         tripLastT = now;
         if (dt > 0) {
-          tripX = tripX * Math.exp(-dt / TRIP_TAU_X)
-                + (speed >= TRIP_MIN_SPEED ? speed * dt : 0);
+          if (speed >= TRIP_MIN_SPEED) { if (!fastSinceT) fastSinceT = now; }
+          else fastSinceT = 0;
+          const sustained = fastSinceT && (now - fastSinceT) >= TRIP_SUSTAIN_MS;
+          tripX = tripX * Math.exp(-dt / TRIP_TAU_X) + (sustained ? speed * dt : 0);
           if (!moving) moveStartT = now;
         }
         if (Math.abs(tripX) * 1000 >= TRIP_MM) {
@@ -1771,7 +1781,7 @@ function coachingFor(slots) {
     samples = []; liveMax = 0; lastResult = null;
     setStartT = performance.now(); recording = true;
     armed = true; setBegun = false; trimFromT = 0;
-    settled = false; settledAtT = 0; tripX = 0; tripLastT = 0; moveStartT = 0;
+    settled = false; settledAtT = 0; tripX = 0; tripLastT = 0; moveStartT = 0; fastSinceT = 0;
     liveG = 0; liveV = 0; liveLastT = 0;
     lastMotionT = setStartT; lastMoveAnyT = setStartT; sawMotion = false;
     // The analysis needs a second or two of stillness to measure gravity and the noise floor,
