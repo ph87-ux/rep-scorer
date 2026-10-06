@@ -1013,12 +1013,45 @@ function coachingFor(slots) {
   // old fixed countdown had the ring a rep and a half ahead of them before they touched the
   // machine, and the setup movement landed in the recording as though it were lifting.
   //
-  // So pressing Start only ARMS it. The set begins once the stack has been still for the
-  // settle period, which is the client in position and ready. Stillness is used rather than a
-  // travel trip because travel cannot be measured live — integrating velocity in real time
-  // drifts without bound, which is why that approach was abandoned early. Stillness is already
-  // detected reliably; it is what ends the set too.
+  // So pressing Start only ARMS it, and starting takes TWO things: the stack still for the
+  // settle period, and then the stack actually travelling a real distance.
+  //
+  // Stillness alone was tried first and is not enough. A stack resting at the bottom creeps
+  // and slides — the plate settling, cable tension easing, the client taking hold — and that
+  // creep is slow enough to pass the stillness test. The set then began on a stack that was
+  // sliding rather than being lifted, the ring started pacing before the client did, and the
+  // slide itself landed in the recording as rep one.
+  //
+  // The reason a travel trip was not used originally was that integrating acceleration live
+  // drifts without bound. That is true of integrating the whole set, and false of what is
+  // needed here: the trip only has to measure travel from a point where the stack is KNOWN to
+  // be still, over the few seconds until it moves. Velocity starts at a true zero and the
+  // integration is thrown away and restarted every time stillness returns, so drift never has
+  // time to accumulate. It is the same well-posed problem as per-phase travel, for the same
+  // reason.
+  const TRIP_MM = 25;        // travel that distinguishes a real first stroke from the stack creeping
+  const TRIP_TAU_G = 4.0;    // s, how fast the gravity reference re-tracks (kills constant error)
+  const TRIP_TAU_V = 3.0;    // s, velocity leak
+  const TRIP_TAU_X = 6.0;    // s, travel leak
+  // Travel only counts while the stack is moving at a real speed. This is what separates a
+  // first rep from a settling stack, and it separates them by an order of magnitude rather
+  // than by a margin. Path length alone could not: eight successive slides plateaued at 37mm
+  // against what was then a 40mm gate, a false start waiting to happen.
+  //
+  // Both numbers are measured rather than chosen. The leak attenuates the peak, so the speed
+  // this reconstructs tracks a stroke's TRUE MEAN speed — 8mm/s for a bar sliding 15mm over
+  // 3s, 26mm/s for a 100mm stroke at 4s, 75mm/s for a 300mm one. The first attempt put the
+  // floor at 20mm/s, which sat almost on top of the 100mm case: it cleared only briefly, too
+  // little travel accumulated, and a 100mm machine never started at all.
+  //
+  // At 13mm/s, across three minutes of a motionless stack, the worst noise wander reaches
+  // 4mm even on a loose mount, while a 100mm stroke reaches 31mm and a 300mm one 118mm. The
+  // 25mm gate therefore sits six times above the noise and still trips the shortest machine
+  // worth measuring. A machine with a stroke much under 100mm will not trip it, which is the
+  // right way to fail: those are already past the point where phase times can be trusted.
+  const TRIP_MIN_SPEED = 0.013;   // m/s
   let armed = false, setBegun = false, trimFromT = 0;
+  let settled = false, settledAtT = 0, gSettle = 0, tripV = 0, tripX = 0, tripLastT = 0, moveStartT = 0;
 
   // A 10-rep set at a 4s tempo is two minutes with nobody touching the screen, so iOS
   // auto-lock fires partway through and the motion events simply stop — the set comes back
@@ -1568,23 +1601,67 @@ function coachingFor(slots) {
     }
     const stillFor = now - lastMotionT;
 
-    // Armed but not yet started: wait for the client to be in position and still.
+    // Armed but not yet started: first settle, then wait for the stack to actually travel.
     if (armed && !setBegun) {
-      if (stillFor >= SETTLE_MS && samples.length > 30) {
-        setBegun = true;
-        ringStart = now;
-        // Keep the quiet settle itself — gravity and the noise floor are measured from it —
-        // but drop the getting-seated movement before it.
-        trimFromT = now - SETTLE_MS;
-      } else {
+      const moving = stillFor < 120;   // the stillness test fired within the last frame or two
+
+      if (!settled) {
+        if (stillFor >= SETTLE_MS && samples.length > 30) {
+          settled = true; settledAtT = now;
+          gSettle = median(samples.slice(-60).map(s => s.mag));
+          tripV = 0; tripX = 0; tripLastT = now; moveStartT = now;
+        }
+      } else if (samples.length) {
+        // Distance travelled recently, as path length rather than net displacement, so a
+        // stroke and the stroke back do not cancel.
+        //
+        // Two things keep this honest over the minute a client may take to get going. The
+        // acceleration is measured against a slowly-tracking gravity estimate rather than a
+        // fixed one, which removes the constant error that would otherwise integrate into a
+        // runaway ramp — a 3mm/s^2 error in a fixed reference reaches the gate on its own in
+        // about five seconds. And both integrals leak, so noise accumulates to a bounded
+        // wander instead of a random walk that trips given long enough. The cost is that
+        // very slow movement is under-counted, which is the right way to be wrong here: the
+        // gate exists to ignore a stack that is creeping.
+        const dt = Math.min(0.1, (now - tripLastT) / 1000);
+        tripLastT = now;
+        if (dt > 0) {
+          const mag = samples[samples.length - 1].mag;
+          gSettle += (mag - gSettle) * Math.min(1, dt / TRIP_TAU_G);
+          tripV = (tripV + (mag - gSettle) * dt) * Math.exp(-dt / TRIP_TAU_V);
+          tripX = tripX * Math.exp(-dt / TRIP_TAU_X)
+                + (Math.abs(tripV) >= TRIP_MIN_SPEED ? Math.abs(tripV) * dt : 0);
+          if (!moving) moveStartT = now;
+        }
+        if (Math.abs(tripX) * 1000 >= TRIP_MM) {
+          setBegun = true;
+          ringStart = now;
+          // Keep a quiet run-up — gravity and the noise floor are measured from it — ending
+          // where this movement began, so the settle is kept and the creep before it is not.
+          trimFromT = moveStartT - SETTLE_MS;
+        }
+      }
+
+      if (!setBegun) {
         setBubble(R_MIN, false);
-        ringCue.textContent = 'GET SET';
+        ringCue.textContent = settled ? 'READY' : 'GET SET';
         ringCue.className = 'ring-cue cue-idle';
-        ringRep.textContent = stillFor >= 600
-          ? 'STARTING IN ' + Math.max(1, Math.ceil((SETTLE_MS - stillFor) / 1000))
-          : 'HOLD STILL WHEN READY';
+        // A machine whose stroke is too short to reach the gate would otherwise sit here
+        // forever saying nothing, which looks identical to the app being broken. Say so.
+        const waited = settled && (now - settledAtT) > 20000;
+        ringRep.textContent = settled
+          ? (waited ? 'NOT SEEING A FULL STROKE' : 'START WHEN YOU LIKE')
+          : (stillFor >= 600
+              ? 'SETTLING · ' + Math.max(1, Math.ceil((SETTLE_MS - stillFor) / 1000))
+              : 'HOLD STILL WHEN READY');
         phaseBig.textContent = 'ARMED';
-        phaseTime.textContent = 'waiting for you to settle · ' + samples.length + ' samples';
+        phaseTime.textContent = settled
+          ? (waited
+              ? 'this machine may travel too little to measure · '
+                + Math.round(Math.abs(tripX) * 1000) + ' of ' + TRIP_MM + 'mm'
+              : 'waiting for the first rep · '
+                + Math.round(Math.abs(tripX) * 1000) + ' of ' + TRIP_MM + 'mm')
+          : 'waiting for you to settle · ' + samples.length + ' samples';
         requestAnimationFrame(tick);
         return;
       }
@@ -1652,6 +1729,7 @@ function coachingFor(slots) {
     samples = []; liveMax = 0; lastResult = null;
     setStartT = performance.now(); recording = true;
     armed = true; setBegun = false; trimFromT = 0;
+    settled = false; settledAtT = 0; gSettle = 0; tripV = 0; tripX = 0; tripLastT = 0; moveStartT = 0;
     lastMotionT = setStartT; sawMotion = false;
     // The analysis needs a second or two of stillness to measure gravity and the noise floor,
     // so the ring holds the client at the start rather than launching straight into rep one.
