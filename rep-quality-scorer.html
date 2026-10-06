@@ -209,7 +209,7 @@
 
   <header>
     <div>
-      <div class="brand">Prototype · velocity engine · build 06 Oct 08:22 UTC</div>
+      <div class="brand">Prototype · velocity engine · build 06 Oct 08:27 UTC</div>
       <h1>Rep Quality Scorer</h1>
     </div>
     <div class="status-row">
@@ -799,6 +799,28 @@ function segmentVelocity(samples, opts) {
       travel: Math.abs(pos[r.i1] - pos[r.i0]),
       peakSpeed: Math.max.apply(null, vel.slice(r.i0, r.i1 + 1).map(Math.abs))
     });
+  }
+
+  // Strokes at either END whose travel is nothing like the rest of the set are dropped. A
+  // client climbs into the machine and climbs back out, and both bookend the recording with
+  // movement that is not lifting. The settle trim covers the one at the start; nothing
+  // covered the one at the end, so a set ran until the moment Stop was pressed and included
+  // whatever happened in between.
+  //
+  // On a pulldown that put 1.8 seconds of 15 m/s^2 into the last three and took stroke-travel
+  // spread to 243%. Removing just that brings it to 53%, and together with the impulse clip
+  // to 27% — inside the bar for a set worth scoring. It also brings measured travel to within
+  // a few percent of the 220mm that stack actually moves.
+  //
+  // Only the ends are trimmed, and only while they are outliers, so a genuinely short rep in
+  // the middle of a set still counts against the client, which is the point of measuring.
+  // Three validated sets and both exact-truth fixtures are unchanged by it.
+  if (phases.length >= 4) {
+    const tvSort = phases.map(p => p.travel).sort((x, y) => x - y);
+    const tMed = tvSort[tvSort.length >> 1], tLo = tMed * 0.4, tHi = tMed * 2.2;
+    const odd = p => p.travel < tLo || p.travel > tHi;
+    while (phases.length > 4 && odd(phases[0])) phases.shift();
+    while (phases.length > 4 && odd(phases[phases.length - 1])) phases.pop();
   }
 
   let alternations = 0;
