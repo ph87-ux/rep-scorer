@@ -241,6 +241,16 @@
       <div class="tempo-field"><label>Eccentric</label><input type="number" id="t2" value="4" step="0.5" min="0.5"></div>
       <div class="tempo-field"><label>Btm pause</label><input type="number" id="p2" value="2" step="0.5" min="0"></div>
     </div>
+    <details style="margin-top:12px;">
+      <summary style="font-size:12px;color:var(--dim);cursor:pointer;">Phase weighting</summary>
+      <div style="font-size:11px;color:var(--dim);margin:8px 0 10px;line-height:1.4;">How much each phase counts toward the set score. Equal by default. A weight of 0 drops a phase from the score entirely — use it on a machine where a hold is not prescribed. These change the score only; the phase times themselves are measured the same way whatever you put here.</div>
+      <div class="tempo-grid">
+        <div class="tempo-field"><label>Concentric</label><input type="number" id="w1" value="1" step="0.5" min="0"></div>
+        <div class="tempo-field"><label>Top pause</label><input type="number" id="wp1" value="1" step="0.5" min="0"></div>
+        <div class="tempo-field"><label>Eccentric</label><input type="number" id="w2" value="1" step="0.5" min="0"></div>
+        <div class="tempo-field"><label>Btm pause</label><input type="number" id="wp2" value="1" step="0.5" min="0"></div>
+      </div>
+    </details>
   </div>
 
   <div class="panel set-hide stage-setup" id="panelRing" style="padding:12px 14px;">
@@ -997,13 +1007,30 @@ function scoreSet(seg, tgt) {
 // The one thing to work on next time: whichever movement phase scores worst across the set.
 // Driven by the same slots the summary shows, so the advice can never name something the
 // numbers above it call fine.
+const weightOf = s => (s.weight === undefined ? 1 : s.weight);
+
+// The set score is a weighted mean of the phase scores. A phase weighted 0 drops out, and a
+// phase with nothing to score (the turnaround never happened) drops out by itself. Under the
+// default equal weights this is exactly the plain mean it replaced, to the digit.
+function weightedSetScore(slots) {
+  let num = 0, den = 0;
+  slots.filter(s => s.rated).forEach(s => { num += s.score * weightOf(s); den += weightOf(s); });
+  return den > 0 ? num / den : null;
+}
+
 function coachingFor(slots) {
-  const rated = slots.filter(s => s.rated);
-  if (!rated.length) return null;
-  const worst = rated.reduce((a, s) => (s.score < a.score ? s : a), rated[0]);
-  if (worst.score >= 90) {
+  // A phase weighted 0 is one the coach said not to score, so it is never the thing to work on.
+  const counted = slots.filter(s => s.rated && weightOf(s) > 0);
+  if (!counted.length) return null;
+  if (counted.every(s => s.score >= 90)) {
     return { good: true, text: 'Tempo on point — nothing in this set is costing marks' };
   }
+  // Name the phase costing the most marks — weight times the shortfall — rather than the
+  // lowest score. With unequal weights those are different phases, and the advice has to
+  // agree with the number it sits under.
+  const loss = s => weightOf(s) * (100 - s.score);
+  const below = counted.filter(s => s.score < 90);
+  const worst = below.reduce((a, s) => (loss(s) > loss(a) ? s : a), below[0]);
   // No measurable value anywhere in the phase means the hold was skipped on every rep. There
   // is no mean to quote and the fault to name is that it did not happen, not that it was off.
   if (worst.mean === null) {
@@ -1194,8 +1221,17 @@ function coachingFor(slots) {
       p2: parseFloat($('t2').value) || 4, q2: parseFloat($('p2').value) || 2,
       conc: parseFloat($('t1').value) || 4, top: parseFloat($('p1').value) || 2,
       ecc: parseFloat($('t2').value) || 4, btm: parseFloat($('p2').value) || 2,
-      tol: 0.6, minPause: parseFloat($('minPauseIn').value) || 0.6
+      tol: 0.6, minPause: parseFloat($('minPauseIn').value) || 0.6,
+      // Weights are a coaching input, not a view this app holds. Equal by default, so the
+      // score says nothing about which phase matters until somebody decides that it does.
+      // || would swallow a deliberate 0, which is the one weight worth setting precisely.
+      wConc: wt('w1'), wTop: wt('wp1'), wEcc: wt('w2'), wBtm: wt('wp2')
     };
+  }
+  // A weight field left blank reads as 1; a weight of 0 means "do not score this phase".
+  function wt(id) {
+    const v = parseFloat($(id).value);
+    return (isFinite(v) && v >= 0) ? v : 1;
   }
   function segOpts(tgt) {
     // A stroke is quiet in its own middle — acceleration passes through zero at mid-stroke —
@@ -1351,10 +1387,10 @@ function coachingFor(slots) {
   function phaseSlots(res) {
     const t = res.targets;
     const defs = [
-      { label: 'Concentric', sub: 'stack rising',  key: 'concentric',  target: t.conc, pause: false, travelKey: 'concTravel' },
-      { label: 'Top pause',  sub: 'stack at top',  key: 'topPause',    target: t.top,  pause: true, flag: 'topUnresolved' },
-      { label: 'Eccentric',  sub: 'stack lowering',key: 'eccentric',   target: t.ecc,  pause: false, travelKey: 'eccTravel' },
-      { label: 'Btm pause',  sub: 'stack at base', key: 'bottomPause', target: t.btm,  pause: true, flag: 'bottomUnresolved' }
+      { label: 'Concentric', sub: 'stack rising',  key: 'concentric',  target: t.conc, pause: false, travelKey: 'concTravel', weight: t.wConc },
+      { label: 'Top pause',  sub: 'stack at top',  key: 'topPause',    target: t.top,  pause: true, flag: 'topUnresolved', weight: t.wTop },
+      { label: 'Eccentric',  sub: 'stack lowering',key: 'eccentric',   target: t.ecc,  pause: false, travelKey: 'eccTravel', weight: t.wEcc },
+      { label: 'Btm pause',  sub: 'stack at base', key: 'bottomPause', target: t.btm,  pause: true, flag: 'bottomUnresolved', weight: t.wBtm }
     ];
     const avg = v => v.reduce((a, b) => a + b, 0) / v.length;
     return defs.map(d => {
@@ -1428,6 +1464,7 @@ function coachingFor(slots) {
       return '<div class="pa-row"><span class="pa-name">' + s.label
         + '<span class="pa-sub">' + s.sub + ' · target ' + s.target.toFixed(1) + 's'
         + (s.n > 1 ? ' · spread ±' + s.sd.toFixed(1) + 's' : '')
+        + (weightOf(s) !== 1 ? ' · weight ×' + weightOf(s) : '')
         + (s.skipped ? ' · ' + s.skipped + ' too short to measure' : '')
         + (s.travel ? ' · travel ~' + (s.travel * 1000).toFixed(0) + 'mm' : '') + '</span></span>'
         + '<span class="pa-time">' + timeTxt + '</span>'
@@ -1466,11 +1503,10 @@ function coachingFor(slots) {
     }
     res.tut = tut;
 
-    const rated = slots.filter(s => s.rated);
-    if (res.reps.length && rated.length) {
-      const avg = rated.reduce((a, s) => a + s.score, 0) / rated.length;
-      summaryNum.textContent = avg.toFixed(0);
-      summaryNum.className = 'num ' + scoreClass(avg);
+    const setScore = weightedSetScore(slots);
+    if (res.reps.length && setScore !== null) {
+      summaryNum.textContent = setScore.toFixed(0);
+      summaryNum.className = 'num ' + scoreClass(setScore);
       $('engineNote').textContent = (res.seg && res.seg.method === 'acceleration')
         ? 'read by the fallback engine — not comparable with other sets'
         : '';
@@ -2105,7 +2141,7 @@ function coachingFor(slots) {
     const travelMatch = (cS.travel && eS.travel)
       ? Math.min(cS.travel, eS.travel) / Math.max(cS.travel, eS.travel) : null;
     const rated = slots.filter(x => x.rated);
-    const score = rated.length ? rated.reduce((a, x) => a + x.score, 0) / rated.length : null;
+    const score = weightedSetScore(slots);
 
     // The signal-ratio check belongs to the acceleration method, as on screen. It asks
     // whether acceleration lobes stand clear of the noise, which is not how the velocity
@@ -2142,6 +2178,9 @@ function coachingFor(slots) {
       schema: 'rep-scorer/1',
       recordedAt: new Date().toISOString(),
       target: { concentric: t.conc, topPause: t.top, eccentric: t.ecc, bottomPause: t.btm },
+      // Carried so a score can be reproduced: the same set under different weights is a
+      // different number, and without these there is no way to tell which one you are reading.
+      weights: { concentric: t.wConc, topPause: t.wTop, eccentric: t.wEcc, bottomPause: t.wBtm },
       measured: {
         reps: res.reps.length,
         timeUnderTensionSeconds: res.tut !== null ? +res.tut.toFixed(1) : null,
