@@ -209,7 +209,7 @@
 
   <header>
     <div>
-      <div class="brand">Prototype · velocity engine · build 06 Oct 08:29 UTC</div>
+      <div class="brand">Prototype · velocity engine · build 07 Oct 11:40 UTC</div>
       <h1>Rep Quality Scorer</h1>
     </div>
     <div class="status-row">
@@ -234,7 +234,7 @@
 
   <div class="panel set-hide stage-setup" id="panelTempo">
     <div class="panel-title">Target Tempo (seconds)</div>
-    <div style="font-size:11px;color:var(--dim);margin:-4px 0 10px;line-height:1.4;">Concentric raises the stack, eccentric lowers it — told apart by direction, not by which came first. Phases lose marks only for being <b>rushed</b>; slower than target costs nothing. Pauses are judged both ways, 20% either side free.</div>
+    <div style="font-size:11px;color:var(--dim);margin:-4px 0 10px;line-height:1.4;">Concentric raises the stack, eccentric lowers it — told apart by direction, not by which came first. Phases lose marks only for being <b>rushed</b>; slower than target costs nothing. Pauses are judged both ways, 20% either side free. A turnaround too short to measure is scored at the min-pause figure below, not skipped.</div>
     <div class="tempo-grid">
       <div class="tempo-field"><label>Concentric</label><input type="number" id="t1" value="4" step="0.5" min="0.5"></div>
       <div class="tempo-field"><label>Top pause</label><input type="number" id="p1" value="2" step="0.5" min="0"></div>
@@ -998,18 +998,25 @@ function scoreSet(seg, tgt) {
 // Driven by the same slots the summary shows, so the advice can never name something the
 // numbers above it call fine.
 function coachingFor(slots) {
-  const rated = slots.filter(s => s.n);
+  const rated = slots.filter(s => s.rated);
   if (!rated.length) return null;
   const worst = rated.reduce((a, s) => (s.score < a.score ? s : a), rated[0]);
   if (worst.score >= 90) {
     return { good: true, text: 'Tempo on point — nothing in this set is costing marks' };
+  }
+  // No measurable value anywhere in the phase means the hold was skipped on every rep. There
+  // is no mean to quote and the fault to name is that it did not happen, not that it was off.
+  if (worst.mean === null) {
+    return { good: false, text: 'Work on: ' + worst.label.toLowerCase()
+      + ' — too short to measure on every rep, against a ' + worst.target.toFixed(1) + 's target' };
   }
   const diff = worst.mean - worst.target;
   const how = worst.pause
     ? (diff > 0 ? 'held ' + diff.toFixed(1) + 's too long' : 'cut ' + Math.abs(diff).toFixed(1) + 's short')
     : 'rushed by ' + Math.abs(diff).toFixed(1) + 's';
   return { good: false, text: 'Work on: ' + worst.label.toLowerCase() + ' — averaged '
-    + worst.mean.toFixed(1) + 's against a ' + worst.target.toFixed(1) + 's target, ' + how };
+    + worst.mean.toFixed(1) + 's against a ' + worst.target.toFixed(1) + 's target, ' + how
+    + (worst.skipped ? ', plus ' + worst.skipped + ' too short to measure' : '') };
 }
 
 // --- UI ---------------------------------------------------------------------
@@ -1325,9 +1332,22 @@ function coachingFor(slots) {
     }
   }
 
-  // One entry per movement phase, averaged across the set. A pause the segmenter could not
-  // resolve is left out of its average rather than dragging it down with a figure that was
-  // never a measurement, and the last rep's missing bottom pause simply contributes nothing.
+  // One entry per movement phase, averaged across the set.
+  //
+  // A pause the segmenter could not resolve used to be dropped from its average, and a phase
+  // where EVERY pause was unresolved dropped out of the set score altogether. That made
+  // skipping a hold cheaper than performing one badly: a pulldown set that never paused at the
+  // bottom scored 75, and a deliberately bad set whose top hold was absent on all ten reps
+  // scored 49 out of three phases instead of four. The rule was right about measurement and
+  // wrong about lifting. Below the floor the app cannot say HOW LONG the hold was, but it can
+  // say it was shorter than the floor, and against a 2s target that is already a miss.
+  //
+  // So an unresolved pause is scored at the floor — the longest it could have been, the best
+  // case consistent with what was measured, so the score can never overstate the fault. The
+  // DISPLAYED time stays the mean of the pauses that were measurable, with the skipped ones
+  // counted beside it: the score may lean on the floor, but no number on screen is one that
+  // nobody measured. The last rep's missing bottom pause is absent rather than skipped, and
+  // still contributes nothing.
   function phaseSlots(res) {
     const t = res.targets;
     const defs = [
@@ -1336,20 +1356,26 @@ function coachingFor(slots) {
       { label: 'Eccentric',  sub: 'stack lowering',key: 'eccentric',   target: t.ecc,  pause: false, travelKey: 'eccTravel' },
       { label: 'Btm pause',  sub: 'stack at base', key: 'bottomPause', target: t.btm,  pause: true, flag: 'bottomUnresolved' }
     ];
+    const avg = v => v.reduce((a, b) => a + b, 0) / v.length;
     return defs.map(d => {
-      const vals = res.reps
-        .filter(r => r[d.key] !== null && r[d.key] !== undefined && !(d.flag && r[d.flag]))
-        .map(r => r[d.key]);
-      if (!vals.length) return Object.assign({}, d, { n: 0 });
-      const mean = vals.reduce((a, b) => a + b, 0) / vals.length;
-      const sd = Math.sqrt(vals.reduce((a, v) => a + (v - mean) * (v - mean), 0) / vals.length);
-      const score = d.pause ? scorePause(mean, d.target, t.tol) : scorePhase(mean, d.target, t.tol);
+      // Present = the turnaround happened at all. Absent (null) is the last rep's missing
+      // bottom pause, which is a gap in the recording, not a skipped hold.
+      const present = res.reps.filter(r => r[d.key] !== null && r[d.key] !== undefined);
+      if (!present.length) return Object.assign({}, d, { n: 0, skipped: 0, rated: false });
+      const shown = present.filter(r => !(d.flag && r[d.flag])).map(r => r[d.key]);
+      const judged = present.map(r => (d.flag && r[d.flag]) ? Math.max(r[d.key], res.minPause) : r[d.key]);
+      const mean = shown.length ? avg(shown) : null;
+      const sd = shown.length
+        ? Math.sqrt(shown.reduce((a, v) => a + (v - mean) * (v - mean), 0) / shown.length) : null;
+      const jm = avg(judged);
+      const score = d.pause ? scorePause(jm, d.target, t.tol) : scorePhase(jm, d.target, t.tol);
       let travel = null;
       if (d.travelKey) {
         const tv = res.reps.map(r => r[d.travelKey]).filter(v => v !== null && v !== undefined);
         if (tv.length) travel = tv.reduce((a, b) => a + b, 0) / tv.length;
       }
-      return Object.assign({}, d, { n: vals.length, mean, sd, score, travel });
+      return Object.assign({}, d, { n: shown.length, skipped: present.length - shown.length,
+                                    rated: true, mean, sd, score, travel });
     });
   }
 
@@ -1395,13 +1421,16 @@ function coachingFor(slots) {
     const pa = $('phaseAverages');
     const slots = phaseSlots(res);
     pa.innerHTML = slots.map(s => {
-      if (!s.n) return '<div class="pa-row"><span class="pa-name">' + s.label
+      if (!s.rated) return '<div class="pa-row"><span class="pa-name">' + s.label
         + '<span class="pa-sub">' + s.sub + '</span></span><span class="pa-time">—</span><span class="pa-score">—</span></div>';
+      // Nothing measurable in the whole phase: show the bound rather than a mean of nothing.
+      const timeTxt = s.n ? s.mean.toFixed(1) + 's' : '&lt;' + res.minPause.toFixed(1) + 's';
       return '<div class="pa-row"><span class="pa-name">' + s.label
         + '<span class="pa-sub">' + s.sub + ' · target ' + s.target.toFixed(1) + 's'
         + (s.n > 1 ? ' · spread ±' + s.sd.toFixed(1) + 's' : '')
+        + (s.skipped ? ' · ' + s.skipped + ' too short to measure' : '')
         + (s.travel ? ' · travel ~' + (s.travel * 1000).toFixed(0) + 'mm' : '') + '</span></span>'
-        + '<span class="pa-time">' + s.mean.toFixed(1) + 's</span>'
+        + '<span class="pa-time">' + timeTxt + '</span>'
         + '<span class="pa-score ' + scoreClass(s.score) + '">' + s.score.toFixed(0) + '</span></div>';
     }).join('');
 
@@ -1437,7 +1466,7 @@ function coachingFor(slots) {
     }
     res.tut = tut;
 
-    const rated = slots.filter(s => s.n);
+    const rated = slots.filter(s => s.rated);
     if (res.reps.length && rated.length) {
       const avg = rated.reduce((a, s) => a + s.score, 0) / rated.length;
       summaryNum.textContent = avg.toFixed(0);
@@ -1546,8 +1575,10 @@ function coachingFor(slots) {
     } else if (res.unresolved) {
       note = res.unresolved + (res.unresolved === 1 ? ' turnaround was' : ' turnarounds were')
         + ' held for less than ' + res.minPause.toFixed(1) + 's, too short to tell the end of one '
-        + 'stroke from the start of the next. Those pauses are marked unresolved and left out of '
-        + 'the score — the phase times either side of them still stand.';
+        + 'stroke from the start of the next. How long each one lasted cannot be measured, so '
+        + (res.unresolved === 1 ? 'it is scored' : 'they are scored') + ' as '
+        + res.minPause.toFixed(1) + 's — the longest ' + (res.unresolved === 1 ? 'it' : 'they')
+        + ' could have been. The phase times either side of them still stand.';
     } else if (travelWarn) {
       noteBad = true;
       note = travelWarn;
@@ -2026,11 +2057,14 @@ function coachingFor(slots) {
     }
     lines.push('set averages by phase:');
     phaseSlots(res).forEach(function(s) {
-      lines.push('  ' + s.label.padEnd(11) + (s.n
-        ? (s.mean.toFixed(1) + 's').padStart(6) + '  vs target ' + s.target.toFixed(1) + 's'
-          + '   spread +/-' + s.sd.toFixed(1) + 's   score ' + s.score.toFixed(0) + '   (n=' + s.n + ')'
-          + (s.travel ? '   stack travel ~' + (s.travel * 1000).toFixed(0) + 'mm' : '')
-        : '   -    no measurable value this set'));
+      if (!s.rated) { lines.push('  ' + s.label.padEnd(11) + '   -    no measurable value this set'); return; }
+      lines.push('  ' + s.label.padEnd(11)
+        + (s.n ? (s.mean.toFixed(1) + 's').padStart(6) : ('<' + res.minPause.toFixed(1) + 's').padStart(6))
+        + '  vs target ' + s.target.toFixed(1) + 's'
+        + (s.n ? '   spread +/-' + s.sd.toFixed(1) + 's' : '')
+        + '   score ' + s.score.toFixed(0)
+        + '   (n=' + s.n + (s.skipped ? ', ' + s.skipped + ' too short to measure' : '') + ')'
+        + (s.travel ? '   stack travel ~' + (s.travel * 1000).toFixed(0) + 'mm' : ''));
     });
     lines.push('');
     res.reps.forEach(function(r, i) {
@@ -2070,7 +2104,7 @@ function coachingFor(slots) {
     const cS = by('Concentric'), eS = by('Eccentric');
     const travelMatch = (cS.travel && eS.travel)
       ? Math.min(cS.travel, eS.travel) / Math.max(cS.travel, eS.travel) : null;
-    const rated = slots.filter(x => x.n);
+    const rated = slots.filter(x => x.rated);
     const score = rated.length ? rated.reduce((a, x) => a + x.score, 0) / rated.length : null;
 
     // The signal-ratio check belongs to the acceleration method, as on screen. It asks
@@ -2095,10 +2129,14 @@ function coachingFor(slots) {
         + ((1 - travelMatch) * 100).toFixed(0) + '%');
     if (res.merged) fails.push(res.merged + ' merged phase(s)');
 
-    const phase = n => { const x = by(n); return x.n ? {
-      meanSeconds: +x.mean.toFixed(2), spreadSeconds: +x.sd.toFixed(2),
+    // meanSeconds is null where every turnaround was too short to resolve: the score stands on
+    // the floor, but there is no measured duration to publish, and samples/skippedSamples say so.
+    const phase = n => { const x = by(n); return x.rated ? {
+      meanSeconds: x.mean !== null ? +x.mean.toFixed(2) : null,
+      spreadSeconds: x.sd !== null ? +x.sd.toFixed(2) : null,
       targetSeconds: x.target, score: Math.round(x.score),
-      travelMm: x.travel ? Math.round(x.travel * 1000) : null, samples: x.n } : null; };
+      travelMm: x.travel ? Math.round(x.travel * 1000) : null,
+      samples: x.n, skippedSamples: x.skipped } : null; };
 
     return {
       schema: 'rep-scorer/1',
