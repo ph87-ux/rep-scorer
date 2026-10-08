@@ -793,7 +793,55 @@ function segmentVelocity(samples, opts) {
     });
     runs = runsFromVelocity(vel, integrate(vel), t, moveThr(vel, FINE_FRAC), minMoveMs, minHoldMs);
   }
-  const pos = integrate(vel);
+  let pos = integrate(vel);
+
+  // Drift the holds could not pin. The pass above anchors velocity to zero through hold
+  // interiors, which is exact but needs holds to exist. On a set lifted without turnarounds —
+  // 0.02s between every phase on a trunk flexion machine — there are fewer than two anchors
+  // and NOTHING above was corrected at all; the velocity went through raw. The leg press
+  // fails the same way from the other end: its phases run 7-16s, so drift accumulates across
+  // a stroke faster than its occasional pause can pin it. Both produced per-rep travel that
+  // is physically impossible — 377mm up against 167mm down on a carrier that must come back
+  // exactly as far as it went — while their SET totals balanced to 9%, which is why the
+  // aggregate travel-match check cleared them.
+  //
+  // So anchor on the turnarounds, which need no pauses and which the segmenter finds reliably
+  // even on those sets: both ran at 100% alternation while their travel wandered. On a machine
+  // the carrier returns to the same two heights every rep, so the MIDPOINT of every stroke is
+  // the same height, and any trend through those midpoints is drift.
+  //
+  // Subtracting it leaves stroke AMPLITUDE alone, and that distinction is the point. A coach
+  // who shortens a client's range mid-set moves the midpoint and the amplitude together;
+  // removing only the midpoint keeps the range change visible, so a coached correction can be
+  // read off the travel afterwards instead of being averaged into nonsense. On a synthetic set
+  // stepping 300mm -> 180mm with no pauses, the raw travel is scatter that hides the step
+  // completely and this recovers 284mm then 191mm.
+  //
+  // Measured on real recordings as median per-rep up/down disagreement, which is zero on a
+  // machine: trunk flexion 54% -> 15%, leg press 55% -> 23%, and every validated set improves
+  // as well (13% -> 7%, 15% -> 9%, 18% -> 6%). A least-squares line through the midpoints was
+  // tried first and does nothing at all (54% -> 56%): the drift wanders rather than holding a
+  // constant bias, so it takes a correction that can follow it.
+  //
+  // This runs AFTER the runs are final, so it moves no phase boundary: every phase duration is
+  // identical to the digit with it on or off, and no tempo reading or score changes because of
+  // it. Only travel changes, and with it the integrity checks that read travel.
+  const mv = runs.filter(r => r.s !== 0);
+  if (mv.length >= 3) {
+    const mid = mv.map(r => ({ i: (r.i0 + r.i1) >> 1, m: (pos[r.i0] + pos[r.i1]) / 2 }));
+    const L = mid.length;
+    const seg = (A, B, i) => A.m + (B.m - A.m) * (i - A.i) / (B.i - A.i);
+    // Past the end midpoints the curve is EXTRAPOLATED along the nearest segment rather than
+    // held flat. Held flat, the drift this removes everywhere else comes back over the first
+    // and last half-stroke: on the synthetic set above, a known 180mm end stroke read 492mm.
+    const bias = i => {
+      if (i <= mid[0].i) return seg(mid[0], mid[1], i);
+      if (i >= mid[L - 1].i) return seg(mid[L - 2], mid[L - 1], i);
+      let k = 0; while (mid[k + 1].i < i) k++;
+      return seg(mid[k], mid[k + 1], i);
+    };
+    pos = pos.map((x, i) => x - bias(i));
+  }
 
   // Moving runs become phases, in the same shape the rest of the app already consumes, so
   // the pauses still fall out of the gaps between them. The difference is that a pause is
