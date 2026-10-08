@@ -209,7 +209,7 @@
 
   <header>
     <div>
-      <div class="brand">Prototype · velocity engine · build 08 Oct 20:42 UTC</div>
+      <div class="brand">Prototype · velocity engine · build 08 Oct 21:30 UTC</div>
       <h1>Rep Quality Scorer</h1>
     </div>
     <div class="status-row">
@@ -1113,6 +1113,44 @@ function coachingFor(slots) {
   // containing a stack clang. Fatigue is normal and must never be flagged, so the bar
   // sits far above 15% and only catches corruption.
   const TRAVEL_SPREAD_BAD = 0.40;
+  // A high travel spread is two different things that need opposite answers. Scattered rep to
+  // rep, the reading is not usable. But a coach who tells a client mid-set to shorten the
+  // range — "stop locking the knee out" — or to reach further makes the set two consistent
+  // halves ON PURPOSE. Averaging across that describes neither half, and refusing it throws
+  // away a correctly coached set: the exact thing the app is meant to catch.
+  //
+  // So before the spread is held against a set, look for the cut that explains it — the split
+  // where BOTH sides are individually as consistent as a set we would accept outright. One
+  // exists only when the range really did change: scatter has no such cut, because every cut
+  // leaves scatter on both sides of it.
+  const RANGE_STEP_MIN = 0.35;   // how far apart the two halves must sit to be a real change
+  function rangeShiftOf(seg) {
+    const tv = (seg.phases || []).map(p => p.travel).filter(x => x > 0);
+    if (tv.length < 6 || seg.travelCV == null) return null;
+    // Below the travel floor nothing about the range is worth reporting, including a change
+    // in it: the set is refused for moving too little, and two unreliable halves are no
+    // better than one.
+    const srtAll = [...tv].sort((a, b) => a - b);
+    if (srtAll[srtAll.length >> 1] * 1000 < TRAVEL_MIN_MM) return null;
+    const cvOf = arr => {
+      const srt = [...arr].sort((a, b) => a - b), m = srt[srt.length >> 1];
+      if (!(m > 0)) return Infinity;
+      let ss = 0; for (const x of arr) ss += (x - m) * (x - m);
+      return Math.sqrt(ss / arr.length) / m;
+    };
+    const medOf = arr => { const srt = [...arr].sort((a, b) => a - b); return srt[srt.length >> 1]; };
+    let best = null;
+    for (let k = 3; k <= tv.length - 3; k++) {
+      const worse = Math.max(cvOf(tv.slice(0, k)), cvOf(tv.slice(k)));
+      if (!best || worse < best.worse) best = { k: k, worse: worse,
+        a: medOf(tv.slice(0, k)), b: medOf(tv.slice(k)) };
+    }
+    if (!best || best.worse > TRAVEL_SPREAD_BAD) return null;
+    const step = Math.abs(best.b - best.a) / Math.max(best.a, best.b);
+    if (step < RANGE_STEP_MIN) return null;
+    return { atStroke: best.k, beforeMm: best.a * 1000, afterMm: best.b * 1000,
+             withinPct: best.worse * 100, stepPct: step * 100 };
+  }
   // How far the stack must actually move for a phase time to mean anything. The spread check
   // above asks whether the reps agree with each other, which a client doing consistently tiny
   // reps passes easily while every number about them is noise — so this asks the separate
@@ -1628,6 +1666,7 @@ function coachingFor(slots) {
     // wildly the reconstruction has been corrupted by something other than lifting.
     const velMethod = seg.method === 'velocity';
     const spread = seg.travelCV;
+    const shift = velMethod ? rangeShiftOf(seg) : null;
     let note = null, noteBad = false;
     const medTravel = (function () {
       const v = (seg.phases || []).map(p => p.travel).filter(x => x > 0).sort((a, b) => a - b);
@@ -1643,10 +1682,11 @@ function coachingFor(slots) {
     } else if (velMethod && spread != null && spread > TRAVEL_SPREAD_BAD) {
       noteBad = true;
       note = 'Could not read this set reliably: stroke travel varied by '
-        + (spread * 100).toFixed(0) + '%, where a stack moving through its fixed range should '
-        + 'repeat to within about 15%. Something other than the lift is in the signal — the '
-        + 'usual causes are the stack being dropped onto its own weight at the bottom, or the '
-        + 'phone moving in its cradle. Treat these phase times as unusable.';
+        + (spread * 100).toFixed(0) + '%, and no single point in the set divides it into two '
+        + 'consistent halves, so it is not a range that changed — it is scattered rep to rep. '
+        + 'A stack moving through its fixed range should repeat to within about 15%. The usual '
+        + 'causes are the stack being dropped onto its own weight at the bottom, or the phone '
+        + 'moving in its cradle. Treat these phase times as unusable.';
     } else if (!velMethod && seg.peak > 0 && ratio < SIGNAL_UNUSABLE) {
       noteBad = true;
       note = 'Signal too weak: peak ' + seg.peak.toFixed(4) + ' m/s² is only ' + ratio.toFixed(1)
@@ -1682,6 +1722,14 @@ function coachingFor(slots) {
       note = 'Signal marginal: peak ' + seg.peak.toFixed(4) + ' m/s² is only ' + ratio.toFixed(1)
         + '× the ' + seg.thr.toFixed(4) + ' threshold. Phase times may read short. Mount more '
         + 'rigidly, use a longer stroke, or lift to a quicker tempo.';
+    }
+    if (shift) {
+      const line = 'Range of motion changed partway through: about ' + shift.beforeMm.toFixed(0)
+        + 'mm a stroke for the first ' + shift.atStroke + ', then about '
+        + shift.afterMm.toFixed(0) + 'mm for the rest, each part consistent in itself. That is '
+        + 'a change in how the set was lifted rather than a bad reading — most often a coaching '
+        + 'cue. The two parts are different work and are worth reading apart.';
+      note = note ? note + ' — ' + line : line;
     }
     if (note) {
       weakSignalNote.style.display = 'block';
@@ -2222,7 +2270,8 @@ function coachingFor(slots) {
     })();
     if (velMethod && mt != null && mt < TRAVEL_MIN_MM)
       fails.push('stack moved only ' + mt.toFixed(0) + 'mm per rep');
-    if (velMethod && s.travelCV != null && s.travelCV > TRAVEL_SPREAD_BAD)
+    const shift = velMethod ? rangeShiftOf(s) : null;
+    if (velMethod && !shift && s.travelCV != null && s.travelCV > TRAVEL_SPREAD_BAD)
       fails.push('stroke travel varied by ' + (s.travelCV * 100).toFixed(0) + '%');
     if (res.unreadable) fails.push('phase direction did not resolve');
     if (travelMatch !== null && travelMatch < 0.8)
@@ -2259,6 +2308,11 @@ function coachingFor(slots) {
         failedChecks: fails,
         engine: s.method || 'acceleration',
         strokeTravelSpreadPct: s.travelCV != null ? Math.round(s.travelCV * 100) : null,
+        // Present only when the spread is explained by the range changing partway through
+        // rather than by a bad reading. atStroke is the stroke it changes at, counting from 1.
+        rangeShift: shift ? { atStroke: shift.atStroke,
+          beforeMm: Math.round(shift.beforeMm), afterMm: Math.round(shift.afterMm),
+          withinPartSpreadPct: Math.round(shift.withinPct) } : null,
         signalRatio: +ratio.toFixed(1),
         alternationPct: Math.round((s.alternation || 0) * 100),
         travelMatchPct: travelMatch !== null ? Math.round(travelMatch * 100) : null,
