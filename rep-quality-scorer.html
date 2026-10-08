@@ -209,7 +209,7 @@
 
   <header>
     <div>
-      <div class="brand">Prototype · velocity engine · build 07 Oct 21:55 UTC</div>
+      <div class="brand">Prototype · velocity engine · build 08 Oct 20:42 UTC</div>
       <h1>Rep Quality Scorer</h1>
     </div>
     <div class="status-row">
@@ -1093,6 +1093,12 @@ function coachingFor(slots) {
 
   let sensorsReady = false, recording = false;
   let samples = [], setStartT = 0, liveMax = 0, lastResult = null;
+  // The recording the RESULT PANEL is currently showing, and the name it should download as.
+  // Kept apart from `samples`, which is the live buffer and goes on changing: loading a file
+  // to look at replaces it, so a download driven off `samples` can hand back something other
+  // than the set on screen. Five different filenames holding one identical recording is what
+  // that looked like from the outside.
+  let lastRaw = '', lastRawName = '';
   let wakeLock = null;
   const SETTLE_MS = 2500;   // stillness the analysis needs before the first rep
 
@@ -1425,7 +1431,13 @@ function coachingFor(slots) {
     return '<div class="pt"><span class="ptk">' + label + '</span><span class="ptv ' + cls + '">' + val.toFixed(1) + 's</span></div>';
   }
 
-  function render(res) {
+  // `keep` says whether this result is a set that was just lifted, or a recording being
+  // looked at again. Saving used to happen here unconditionally, which meant loading a CSV
+  // to re-examine it filed it as a brand new set, stamped with the time it was opened. A
+  // session then filled with phantom sets nobody had performed, every one of them holding
+  // the same recording — and their per-set CSV buttons all handed back those same bytes
+  // under different names, which is how one pulldown set came back five times.
+  function render(res, keep) {
     lastResult = res;
     $('copyBtn').style.display = 'block';
     $('rawBtn').style.display = 'block';
@@ -1633,7 +1645,8 @@ function coachingFor(slots) {
 
     // Keep the set. Recorded even when it cannot be trusted, flagged rather than dropped —
     // a set that failed is still evidence, and silently discarding it would hide a rig
-    // problem behind an apparently short session.
+    // problem behind an apparently short session. A re-examined recording is not a set.
+    if (!keep) return;
     const rec = resultRecord(res);
     rec.machine = $('machineIn').value.trim() || null;
     // Keep the recording itself with the set. Raw samples used to live in one variable that
@@ -1642,19 +1655,23 @@ function coachingFor(slots) {
     // destroyed its own evidence as it went: by the time a reading looked wrong, the data
     // needed to explain it was gone. Stored as the CSV text rather than the sample objects
     // because it is about a fifth of the size and is exactly what gets downloaded.
-    rec.raw = samplesToCsv(samples);
+    rec.raw = lastRaw || samplesToCsv(samples);
+    lastRawName = csvName(rec.recordedAt);
     session.push(rec);
     saveSession(); renderSession();
   }
 
-  function analyse() {
+  function analyse(keep) {
     const tgt = targets();
+    // Captured here, not at download time: this is the one point where the samples are
+    // guaranteed to be the ones the result about to be rendered was computed from.
     // Everything before the client settled is cradling the phone and getting seated, not
     // lifting. Dropped so it cannot produce phases or distort the baseline.
     if (trimFromT) {
       const kept = samples.filter(s => s.t >= trimFromT);
       if (kept.length > 30) samples = kept;
     }
+    lastRaw = samplesToCsv(samples);
     const seg = segmentBest(samples, segOpts(tgt));
     const minPause = parseFloat($('minPauseIn').value) || 0.6;
 
@@ -1687,7 +1704,7 @@ function coachingFor(slots) {
     scored.forEach(r => { if (r.pause1Unresolved) unresolved++; if (r.pause2Unresolved) unresolved++; });
     render({ seg, reps: scored, targets: tgt, merged: merged, runLimit: runLimit,
              minPause: minPause, dropped: all.length - scored.length, unresolved: unresolved,
-             unreadable: unreadable });
+             unreadable: unreadable }, keep);
   }
 
   // --- the pacing ring -----------------------------------------------------------------
@@ -2007,7 +2024,7 @@ function coachingFor(slots) {
     // set, and a canvas measured while hidden has zero width, so drawing the trend
     // first produced an empty chart.
     document.body.classList.add('has-result');
-    analyse();
+    analyse(true);
     $('panelSummary').scrollIntoView({ behavior: 'smooth', block: 'start' });
   }
   stopSetBtn.addEventListener('click', finishSet);
@@ -2261,7 +2278,7 @@ function coachingFor(slots) {
       b.addEventListener('click', function() {
         const r = session[+b.getAttribute('data-i')];
         if (!r || !r.raw) return;
-        downloadCsv(r.raw, r.recordedAt);
+        downloadCsv(r.raw, csvName(r.recordedAt));
         b.textContent = 'OK'; setTimeout(function(){ b.textContent = 'CSV'; }, 1400);
       });
     });
@@ -2304,21 +2321,27 @@ function coachingFor(slots) {
     for (const s of arr) rows.push((s.t - t0).toFixed(1) + ',' + s.mag.toFixed(4));
     return rows.join('\n');
   }
-  function downloadCsv(text, stamp) {
+  // Named after when the set was RECORDED, never when it was downloaded. Two downloads of
+  // one set then collide on the same name instead of masquerading as two different sets,
+  // and a file can be matched back to the row it came from.
+  function csvName(stamp) {
+    return 'rep-set-' + String(stamp || new Date().toISOString())
+      .slice(0, 19).replace(/[:T]/g, '-') + '.csv';
+  }
+  function downloadCsv(text, name) {
     if (!text) return;
     const blob = new Blob([text], { type: 'text/csv' });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
-    a.download = 'rep-set-' + String(stamp || new Date().toISOString())
-      .slice(0, 19).replace(/[:T]/g, '-') + '.csv';
+    a.download = name || csvName(null);
     document.body.appendChild(a); a.click(); document.body.removeChild(a);
     setTimeout(function() { URL.revokeObjectURL(url); }, 2000);
   }
   const rawBtn = $('rawBtn');
   rawBtn.addEventListener('click', function() {
-    if (!samples.length) return;
-    downloadCsv(samplesToCsv(samples));
+    if (!lastRaw) return;
+    downloadCsv(lastRaw, lastRawName);
     rawBtn.textContent = 'Saved'; setTimeout(function(){ rawBtn.textContent = 'Download raw signal (.csv)'; }, 1600);
   });
 
@@ -2342,12 +2365,13 @@ function coachingFor(slots) {
       }
       if (loaded.length < 20) { showError('That file has too few samples to analyse.'); return; }
       recording = false; samples = loaded;
+      lastRawName = file.name || csvName(null);
       statusText.textContent = 'loaded';
       phaseBig.textContent = 'LOADED'; phaseBig.className = 'phase-big phase-idle';
       phaseTime.textContent = samples.length + ' samples from file';
       errBox.style.display = 'none';
       document.body.classList.add('has-result');
-      analyse();
+      analyse(false);
     };
     reader.readAsText(file);
   });
