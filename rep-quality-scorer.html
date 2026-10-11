@@ -209,7 +209,7 @@
 
   <header>
     <div>
-      <div class="brand">Prototype · velocity engine · build 11 Oct 08:37 UTC</div>
+      <div class="brand">Prototype · velocity engine · build 11 Oct 09:08 UTC</div>
       <h1>Rep Quality Scorer</h1>
     </div>
     <div class="status-row">
@@ -224,9 +224,11 @@
 
   <div class="panel set-hide stage-setup" id="panelMachine">
     <div class="panel-title">Machine</div>
-    <input type="text" id="machineIn" placeholder="e.g. C1 — Pullover" autocomplete="off"
+    <select id="machineIn"
       style="width:100%;background:var(--card);border:1px solid var(--hair);color:var(--ink);
       border-radius:10px;padding:13px 14px;font-family:var(--sans);font-size:16px;font-weight:600;">
+      <option value="">Not set — holds judged both ways</option>
+    </select>
     <div style="font-size:12px;color:var(--dim);margin-top:8px;line-height:1.45;font-weight:500;">
       Kept with each set so a session across several machines stays sorted. The analysis needs
       no per-machine setup — gravity and noise are measured from every recording.</div>
@@ -1042,10 +1044,25 @@ function scorePhase(actual, target, tol, graceFrac, slowFrac) {
 // A pause is wrong in both directions — too short loses the hold, too long bleeds tension —
 // so it keeps a symmetric band, 20% of the target either side. The 0.15s floor only bites on
 // very short targets, where 20% would otherwise be finer than the measurement itself.
+// A hold is not one thing. Where the muscle is still carrying the stack the hold IS the work,
+// and holding it longer than asked is not a fault — it is more of what was asked for. Where
+// the skeleton has taken the load, at a pressing lockout, the same seconds are rest, and
+// running long is dead time that should cost. Which of the two a given end of a given machine
+// is cannot be derived from the signal: it is a fact about the machine, and it lives in
+// machines.json. longFrac null means the long side is not judged.
+//
+// Cutting a hold short deducts either way, on every machine and at both ends. The
+// classification only ever decides whether running LONG costs anything.
 const PAUSE_BAND = 0.20;
-function scorePause(actual, target, tol, graceFrac) {
-  const err = Math.abs(actual - target);
-  const grace = Math.max(0.15, target * (graceFrac == null ? PAUSE_BAND : graceFrac));
+function scorePause(actual, target, tol, shortFrac, longFrac) {
+  const band = f => Math.max(0.15, target * f);
+  if (actual < target) {
+    const err = target - actual, grace = band(shortFrac == null ? PAUSE_BAND : shortFrac);
+    if (err <= grace) return 100;
+    return Math.max(0, 100 - ((err - grace) / (tol * 2)) * 100);
+  }
+  if (longFrac == null) return 100;
+  const err = actual - target, grace = band(longFrac);
   if (err <= grace) return 100;
   return Math.max(0, 100 - ((err - grace) / (tol * 2)) * 100);
 }
@@ -1193,6 +1210,28 @@ function coachingFor(slots) {
   // 100mm, 0.38s at 70mm and 0.67s at 50mm. Against a 4s target the first three are inside
   // the scoring grace band and the last two are not.
   const TRAVEL_MIN_MM = 100, TRAVEL_MARGINAL_MM = 150;
+  // machines.json sits next to this file and holds the per-machine hold rules. It is fetched
+  // rather than inlined so there is one copy to edit, and every failure path leaves the app
+  // exactly as it was without it: no machine selected means the configured allowances apply
+  // to both ends, which is what the app did before the file was read at all.
+  let MACHINES = [];
+  function machineByCode(code) {
+    for (const m of MACHINES) if (m.code === code) return m;
+    return null;
+  }
+  (function loadMachines() {
+    if (typeof fetch !== 'function') return;
+    fetch('machines.json').then(r => r.ok ? r.json() : null).then(d => {
+      if (!d || !Array.isArray(d.machines)) return;
+      MACHINES = d.machines;
+      const sel = $('machineIn');
+      for (const m of MACHINES) {
+        const o = document.createElement('option');
+        o.value = m.code; o.textContent = m.code + ' — ' + m.name;
+        sel.appendChild(o);
+      }
+    }).catch(function () { /* offline, or opened as a file: the app works without it */ });
+  })();
   const trendCanvas = $('trendCanvas'), trendCtx = trendCanvas.getContext('2d');
   const ringArc = $('ringArc'), ringCue = $('ringCue'), ringCount = $('ringCount'), ringRep = $('ringRep');
   const ringToggle = $('ringToggle');
@@ -1338,6 +1377,7 @@ function coachingFor(slots) {
   });
 
   function targets() {
+    const mach = machineByCode($('machineIn').value);
     return {
       p1: parseFloat($('t1').value) || 4, q1: parseFloat($('p1').value) || 2,
       p2: parseFloat($('t2').value) || 4, q2: parseFloat($('p2').value) || 2,
@@ -1352,7 +1392,11 @@ function coachingFor(slots) {
       // judged from its target exactly; the 0.15s floor inside the scorers still applies, so
       // a short target cannot be held finer than the segmenter can measure.
       gConc: gr('g1', 0.15), gTop: gr('gp1', 0.20), gEcc: gr('g2', 0.15), gBtm: gr('gp2', 0.20),
-      sConc: grOpt('gs1'), sEcc: grOpt('gs2')
+      sConc: grOpt('gs1'), sEcc: grOpt('gs2'),
+      // null where no machine is chosen, which leaves both ends judged on both sides.
+      machineCode: $('machineIn').value || null,
+      holdTop: mach ? mach.topHold : null,
+      holdBtm: mach ? mach.bottomHold : null
     };
   }
   // An allowance field left blank falls back to the figure that phase used before it was
@@ -1528,9 +1572,13 @@ function coachingFor(slots) {
     const t = res.targets;
     const defs = [
       { label: 'Concentric', sub: 'stack rising',  key: 'concentric',  target: t.conc, pause: false, travelKey: 'concTravel', weight: t.wConc, grace: t.gConc, slow: t.sConc },
-      { label: 'Top pause',  sub: 'stack at top',  key: 'topPause',    target: t.top,  pause: true, flag: 'topUnresolved', weight: t.wTop, grace: t.gTop },
+      { label: 'Top pause',  sub: 'stack at top',  key: 'topPause',    target: t.top,  pause: true, flag: 'topUnresolved', weight: t.wTop, grace: t.gTop,
+        // LOADED: the muscle is still carrying the stack, so a long hold is more work, not a
+        // fault. REST, or no machine chosen: judged both ways as before.
+        longGrace: t.holdTop === 'LOADED' ? null : t.gTop, hold: t.holdTop },
       { label: 'Eccentric',  sub: 'stack lowering',key: 'eccentric',   target: t.ecc,  pause: false, travelKey: 'eccTravel', weight: t.wEcc, grace: t.gEcc, slow: t.sEcc },
-      { label: 'Btm pause',  sub: 'stack at base', key: 'bottomPause', target: t.btm,  pause: true, flag: 'bottomUnresolved', weight: t.wBtm, grace: t.gBtm }
+      { label: 'Btm pause',  sub: 'stack at base', key: 'bottomPause', target: t.btm,  pause: true, flag: 'bottomUnresolved', weight: t.wBtm, grace: t.gBtm,
+        longGrace: t.holdBtm === 'LOADED' ? null : t.gBtm, hold: t.holdBtm }
     ];
     const avg = v => v.reduce((a, b) => a + b, 0) / v.length;
     return defs.map(d => {
@@ -1544,7 +1592,7 @@ function coachingFor(slots) {
       const sd = shown.length
         ? Math.sqrt(shown.reduce((a, v) => a + (v - mean) * (v - mean), 0) / shown.length) : null;
       const jm = avg(judged);
-      const score = d.pause ? scorePause(jm, d.target, t.tol, d.grace)
+      const score = d.pause ? scorePause(jm, d.target, t.tol, d.grace, d.longGrace)
                             : scorePhase(jm, d.target, t.tol, d.grace, d.slow);
       let travel = null;
       if (d.travelKey) {
@@ -1556,13 +1604,13 @@ function coachingFor(slots) {
     });
   }
 
-  function cell(label, val, target, tol, unresolved, isPause, grace, slow) {
+  function cell(label, val, target, tol, unresolved, isPause, grace, slow, longGrace) {
     if (val === null || val === undefined) return '<div class="pt"><span class="ptk">' + label + '</span><span class="ptv">—</span></div>';
     // Shown in full, but marked: the stroke boundaries either side of a pause this short are
     // not separable, so the figure is an artefact of where the threshold happened to fall.
     if (unresolved) return '<div class="pt" style="opacity:.55"><span class="ptk">' + label
       + '</span><span class="ptv" style="font-size:11px">&lt;' + tol.toFixed(1) + 's<br>unresolved</span></div>';
-    const cls = scoreClass(isPause ? scorePause(val, target, tol, grace)
+    const cls = scoreClass(isPause ? scorePause(val, target, tol, grace, longGrace)
                                    : scorePhase(val, target, tol, grace, slow));
     return '<div class="pt"><span class="ptk">' + label + '</span><span class="ptv ' + cls + '">' + val.toFixed(1) + 's</span></div>';
   }
@@ -1590,9 +1638,11 @@ function coachingFor(slots) {
           '<div class="rep-card-top"><div class="rep-num">REP ' + (i + 1) + '</div></div>' +
           '<div class="phase-times">' +
             cell('CONC', r.concentric, tgt.conc, tgt.tol, false, false, tgt.gConc, tgt.sConc) +
-            cell('TOP', r.topPause, tgt.top, tgt.minPause, r.topUnresolved, true, tgt.gTop) +
+            cell('TOP', r.topPause, tgt.top, tgt.minPause, r.topUnresolved, true, tgt.gTop, null,
+                 tgt.holdTop === 'LOADED' ? null : tgt.gTop) +
             cell('ECC', r.eccentric, tgt.ecc, tgt.tol, false, false, tgt.gEcc, tgt.sEcc) +
-            cell('BTM', r.bottomPause, tgt.btm, tgt.minPause, r.bottomUnresolved, true, tgt.gBtm) +
+            cell('BTM', r.bottomPause, tgt.btm, tgt.minPause, r.bottomUnresolved, true, tgt.gBtm, null,
+                 tgt.holdBtm === 'LOADED' ? null : tgt.gBtm) +
           '</div>';
         repList.appendChild(d);
       });
@@ -1612,6 +1662,8 @@ function coachingFor(slots) {
       return '<div class="pa-row"><span class="pa-name">' + s.label
         + '<span class="pa-sub">' + s.sub + ' · target ' + s.target.toFixed(1) + 's'
         + (s.n > 1 ? ' · spread ±' + s.sd.toFixed(1) + 's' : '')
+        + (s.hold === 'LOADED' ? ' · loaded, holding longer is free'
+           : s.hold === 'REST' ? ' · rest, judged both ways' : '')
         + (weightOf(s) !== 1 ? ' · weight ×' + weightOf(s) : '')
         + (s.skipped ? ' · ' + s.skipped + ' too short to measure' : '')
         + (s.travel ? ' · travel ~' + (s.travel * 1000).toFixed(0) + 'mm' : '') + '</span></span>'
@@ -1794,7 +1846,9 @@ function coachingFor(slots) {
     // problem behind an apparently short session. A re-examined recording is not a set.
     if (!keep) return;
     const rec = resultRecord(res);
-    rec.machine = $('machineIn').value.trim() || null;
+    // The readable label, not the bare code: the session list is what a coach reads back.
+    const mSel = $('machineIn');
+    rec.machine = mSel.value ? (mSel.options[mSel.selectedIndex] || {}).textContent || mSel.value : null;
     // Keep the recording itself with the set. Raw samples used to live in one variable that
     // the next set cleared, so the only set whose signal could be exported was the most
     // recent one, and only until another was started. A trial of several sets therefore
@@ -2351,6 +2405,8 @@ function coachingFor(slots) {
                       eccentric: Math.round(t.gEcc * 100), bottomPause: Math.round(t.gBtm * 100) },
       slowAllowancePct: { concentric: t.sConc == null ? null : Math.round(t.sConc * 100),
                           eccentric: t.sEcc == null ? null : Math.round(t.sEcc * 100) },
+      // Which rulebook entry was applied, so a score can be reproduced. null means none was.
+      holdRule: { machine: t.machineCode, top: t.holdTop, bottom: t.holdBtm },
       measured: {
         reps: res.reps.length,
         timeUnderTensionSeconds: res.tut !== null ? +res.tut.toFixed(1) : null,

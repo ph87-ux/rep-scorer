@@ -39,9 +39,8 @@
       "bottomHold": "LOADED",
       "stackTravelMm": null,
       "targetTempo": null,
-      "notes": "Hamstring holds against resistance at full flexion. Bottom set to LOADED by the coached-hover policy — submitted as REST, which would only be right if this machine's bottom position sheds the load even when hovered. Confirm.",
-      "needsConfirmation": true,
-      "openQuestion": "Submitted with bottomHold REST, set to LOADED by the coached-hover policy. Confirm whether this machine's bottom position sheds the load even when hovered."
+      "notes": "Hamstring holds against resistance at full flexion. Bottom confirmed LOADED by the coach: this machine keeps tension at both ends, so the submitted REST was wrong and the coached-hover policy was right. No longer an open question.",
+      "needsConfirmation": false
     },
     {
       "code": "B8",
