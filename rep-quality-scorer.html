@@ -209,7 +209,7 @@
 
   <header>
     <div>
-      <div class="brand">Prototype · velocity engine · build 11 Oct 07:40 UTC</div>
+      <div class="brand">Prototype · velocity engine · build 11 Oct 08:37 UTC</div>
       <h1>Rep Quality Scorer</h1>
     </div>
     <div class="status-row">
@@ -234,7 +234,7 @@
 
   <div class="panel set-hide stage-setup" id="panelTempo">
     <div class="panel-title">Target Tempo (seconds)</div>
-    <div style="font-size:11px;color:var(--dim);margin:-4px 0 10px;line-height:1.4;">Concentric raises the stack, eccentric lowers it — told apart by direction, not by which came first. Phases lose marks only for being <b>rushed</b>; slower than target costs nothing. Pauses are judged both ways. How much either phase may be off before it costs marks is set per phase under <b>Phase allowance</b> below. A turnaround too short to measure is scored at the min-pause figure in Debug, not skipped.</div>
+    <div style="font-size:11px;color:var(--dim);margin:-4px 0 10px;line-height:1.4;">Concentric raises the stack, eccentric lowers it — told apart by direction, not by which came first. Pauses are judged both ways. A stroke is judged on the fast side always, and on the slow side only where a slow allowance is set — by default the concentric is free to run long and the eccentric is not. How much either phase may be off before it costs marks is set per phase under <b>Phase allowance</b> below. A turnaround too short to measure is scored at the min-pause figure in Debug, not skipped.</div>
     <div class="tempo-grid">
       <div class="tempo-field"><label>Concentric</label><input type="number" id="t1" value="4" step="0.5" min="0.5"></div>
       <div class="tempo-field"><label>Top pause</label><input type="number" id="p1" value="2" step="0.5" min="0"></div>
@@ -243,12 +243,17 @@
     </div>
     <details style="margin-top:12px;">
       <summary style="font-size:12px;color:var(--dim);cursor:pointer;">Phase allowance (%)</summary>
-      <div style="font-size:11px;color:var(--dim);margin:8px 0 10px;line-height:1.4;">How far off target a phase may be before it starts losing marks, as a percentage of that phase's target. Strokes are judged on the <b>fast side only</b> — slower than target never costs marks, whatever is set here. Pauses are judged both ways. Lower the number on a phase to hold it closer.</div>
+      <div style="font-size:11px;color:var(--dim);margin:8px 0 10px;line-height:1.4;">How far off target a phase may be before it starts losing marks, as a percentage of that phase's target. This is the <b>fast side</b> for strokes and both sides for pauses. Lower the number on a phase to hold it closer.</div>
       <div class="tempo-grid">
         <div class="tempo-field"><label>Concentric</label><input type="number" id="g1" value="10" step="1" min="0" max="100"></div>
         <div class="tempo-field"><label>Top pause</label><input type="number" id="gp1" value="15" step="1" min="0" max="100"></div>
         <div class="tempo-field"><label>Eccentric</label><input type="number" id="g2" value="20" step="1" min="0" max="100"></div>
         <div class="tempo-field"><label>Btm pause</label><input type="number" id="gp2" value="15" step="1" min="0" max="100"></div>
+      </div>
+      <div style="font-size:11px;color:var(--dim);margin:12px 0 8px;line-height:1.4;"><b>Slow side</b> — strokes only, and off unless a number is set. Blank means running long costs nothing, which is the right answer for the concentric: a client grinding out a long rep has earned the time, not lost control of it. A lowering that runs long is the opposite, so it is given a slow side by default.</div>
+      <div class="tempo-grid" style="grid-template-columns:1fr 1fr;">
+        <div class="tempo-field"><label>Conc slow</label><input type="number" id="gs1" value="" placeholder="off" step="1" min="0" max="100"></div>
+        <div class="tempo-field"><label>Ecc slow</label><input type="number" id="gs2" value="15" step="1" min="0" max="100"></div>
       </div>
     </details>
     <details style="margin-top:12px;">
@@ -883,10 +888,20 @@ function segmentVelocity(samples, opts) {
   // Only the ends are trimmed, and only while they are outliers, so a genuinely short rep in
   // the middle of a set still counts against the client, which is the point of measuring.
   // Three validated sets and both exact-truth fixtures are unchanged by it.
+  //
+  // Travel was the only test here, and it misses the commonest lead-out of all: the client
+  // riding the stack down at the end, which covers a perfectly normal distance and simply
+  // takes far too long. On one pulldown the last phase ran 10.1s against 4.2-4.7s for every
+  // other rep in the set, passed the travel test untouched, and dragged the mean eccentric
+  // from 4.5s to 5.9s. So an end phase that lasts far longer than the rest of the set is
+  // dropped too. Only the high side: a short end phase is more likely a quick rep than a
+  // stray, and anything shorter than MIN_MOVE_S is already gone.
   if (phases.length >= 4) {
     const tvSort = phases.map(p => p.travel).sort((x, y) => x - y);
     const tMed = tvSort[tvSort.length >> 1], tLo = tMed * 0.4, tHi = tMed * 2.2;
-    const odd = p => p.travel < tLo || p.travel > tHi;
+    const dSort = phases.map(p => p.dur).sort((x, y) => x - y);
+    const dHi = dSort[dSort.length >> 1] * 2.2;
+    const odd = p => p.travel < tLo || p.travel > tHi || p.dur > dHi;
     while (phases.length > 4 && odd(phases[0])) phases.shift();
     while (phases.length > 4 && odd(phases[phases.length - 1])) phases.pop();
   }
@@ -1006,10 +1021,20 @@ function segmentBest(samples, opts) {
 // cares most about the concentric wants it held closer than the lowering, and saying so in
 // one global number was not possible.
 const FAST_GRACE_FRAC = 0.15;
-function scorePhase(actual, target, tol, graceFrac) {
-  if (actual >= target) return 100;              // slower than asked: no penalty, by design
-  const err = target - actual;
-  const grace = Math.max(0.15, target * (graceFrac == null ? FAST_GRACE_FRAC : graceFrac));
+// slowFrac null means what it always meant: slower than target costs nothing, because time
+// under tension is the point and a client grinding out a long rep has nothing to correct.
+// That is right for the concentric and wrong for the lowering, where a stroke that runs long
+// is a client losing control of the weight rather than earning extra work, so the eccentric
+// gets a slow side of its own.
+function scorePhase(actual, target, tol, graceFrac, slowFrac) {
+  const band = f => Math.max(0.15, target * f);
+  if (actual < target) {
+    const err = target - actual, grace = band(graceFrac == null ? FAST_GRACE_FRAC : graceFrac);
+    if (err <= grace) return 100;
+    return Math.max(0, 100 - ((err - grace) / (tol * 2)) * 100);
+  }
+  if (slowFrac == null) return 100;
+  const err = actual - target, grace = band(slowFrac);
   if (err <= grace) return 100;
   return Math.max(0, 100 - ((err - grace) / (tol * 2)) * 100);
 }
@@ -1326,7 +1351,8 @@ function coachingFor(slots) {
       // As a fraction, because that is what the scorers take. A phase set to 0 allowance is
       // judged from its target exactly; the 0.15s floor inside the scorers still applies, so
       // a short target cannot be held finer than the segmenter can measure.
-      gConc: gr('g1', 0.15), gTop: gr('gp1', 0.20), gEcc: gr('g2', 0.15), gBtm: gr('gp2', 0.20)
+      gConc: gr('g1', 0.15), gTop: gr('gp1', 0.20), gEcc: gr('g2', 0.15), gBtm: gr('gp2', 0.20),
+      sConc: grOpt('gs1'), sEcc: grOpt('gs2')
     };
   }
   // An allowance field left blank falls back to the figure that phase used before it was
@@ -1334,6 +1360,13 @@ function coachingFor(slots) {
   function gr(id, dflt) {
     const v = parseFloat($(id).value);
     return (isFinite(v) && v >= 0) ? v / 100 : dflt;
+  }
+  // Blank here is a setting, not a missing value: it means the slow side is not judged at all.
+  function grOpt(id) {
+    const raw = $(id).value.trim();
+    if (!raw) return null;
+    const v = parseFloat(raw);
+    return (isFinite(v) && v >= 0) ? v / 100 : null;
   }
   // A weight field left blank reads as 1; a weight of 0 means "do not score this phase".
   function wt(id) {
@@ -1494,9 +1527,9 @@ function coachingFor(slots) {
   function phaseSlots(res) {
     const t = res.targets;
     const defs = [
-      { label: 'Concentric', sub: 'stack rising',  key: 'concentric',  target: t.conc, pause: false, travelKey: 'concTravel', weight: t.wConc, grace: t.gConc },
+      { label: 'Concentric', sub: 'stack rising',  key: 'concentric',  target: t.conc, pause: false, travelKey: 'concTravel', weight: t.wConc, grace: t.gConc, slow: t.sConc },
       { label: 'Top pause',  sub: 'stack at top',  key: 'topPause',    target: t.top,  pause: true, flag: 'topUnresolved', weight: t.wTop, grace: t.gTop },
-      { label: 'Eccentric',  sub: 'stack lowering',key: 'eccentric',   target: t.ecc,  pause: false, travelKey: 'eccTravel', weight: t.wEcc, grace: t.gEcc },
+      { label: 'Eccentric',  sub: 'stack lowering',key: 'eccentric',   target: t.ecc,  pause: false, travelKey: 'eccTravel', weight: t.wEcc, grace: t.gEcc, slow: t.sEcc },
       { label: 'Btm pause',  sub: 'stack at base', key: 'bottomPause', target: t.btm,  pause: true, flag: 'bottomUnresolved', weight: t.wBtm, grace: t.gBtm }
     ];
     const avg = v => v.reduce((a, b) => a + b, 0) / v.length;
@@ -1512,7 +1545,7 @@ function coachingFor(slots) {
         ? Math.sqrt(shown.reduce((a, v) => a + (v - mean) * (v - mean), 0) / shown.length) : null;
       const jm = avg(judged);
       const score = d.pause ? scorePause(jm, d.target, t.tol, d.grace)
-                            : scorePhase(jm, d.target, t.tol, d.grace);
+                            : scorePhase(jm, d.target, t.tol, d.grace, d.slow);
       let travel = null;
       if (d.travelKey) {
         const tv = res.reps.map(r => r[d.travelKey]).filter(v => v !== null && v !== undefined);
@@ -1523,14 +1556,14 @@ function coachingFor(slots) {
     });
   }
 
-  function cell(label, val, target, tol, unresolved, isPause, grace) {
+  function cell(label, val, target, tol, unresolved, isPause, grace, slow) {
     if (val === null || val === undefined) return '<div class="pt"><span class="ptk">' + label + '</span><span class="ptv">—</span></div>';
     // Shown in full, but marked: the stroke boundaries either side of a pause this short are
     // not separable, so the figure is an artefact of where the threshold happened to fall.
     if (unresolved) return '<div class="pt" style="opacity:.55"><span class="ptk">' + label
       + '</span><span class="ptv" style="font-size:11px">&lt;' + tol.toFixed(1) + 's<br>unresolved</span></div>';
     const cls = scoreClass(isPause ? scorePause(val, target, tol, grace)
-                                   : scorePhase(val, target, tol, grace));
+                                   : scorePhase(val, target, tol, grace, slow));
     return '<div class="pt"><span class="ptk">' + label + '</span><span class="ptv ' + cls + '">' + val.toFixed(1) + 's</span></div>';
   }
 
@@ -1556,9 +1589,9 @@ function coachingFor(slots) {
         d.innerHTML =
           '<div class="rep-card-top"><div class="rep-num">REP ' + (i + 1) + '</div></div>' +
           '<div class="phase-times">' +
-            cell('CONC', r.concentric, tgt.conc, tgt.tol, false, false, tgt.gConc) +
+            cell('CONC', r.concentric, tgt.conc, tgt.tol, false, false, tgt.gConc, tgt.sConc) +
             cell('TOP', r.topPause, tgt.top, tgt.minPause, r.topUnresolved, true, tgt.gTop) +
-            cell('ECC', r.eccentric, tgt.ecc, tgt.tol, false, false, tgt.gEcc) +
+            cell('ECC', r.eccentric, tgt.ecc, tgt.tol, false, false, tgt.gEcc, tgt.sEcc) +
             cell('BTM', r.bottomPause, tgt.btm, tgt.minPause, r.bottomUnresolved, true, tgt.gBtm) +
           '</div>';
         repList.appendChild(d);
@@ -2316,6 +2349,8 @@ function coachingFor(slots) {
       // is a different number, and nothing else in the export would say which one this is.
       allowancePct: { concentric: Math.round(t.gConc * 100), topPause: Math.round(t.gTop * 100),
                       eccentric: Math.round(t.gEcc * 100), bottomPause: Math.round(t.gBtm * 100) },
+      slowAllowancePct: { concentric: t.sConc == null ? null : Math.round(t.sConc * 100),
+                          eccentric: t.sEcc == null ? null : Math.round(t.sEcc * 100) },
       measured: {
         reps: res.reps.length,
         timeUnderTensionSeconds: res.tut !== null ? +res.tut.toFixed(1) : null,
