@@ -209,7 +209,7 @@
 
   <header>
     <div>
-      <div class="brand">Prototype · velocity engine · build 11 Oct 09:08 UTC</div>
+      <div class="brand">Prototype · velocity engine · build 11 Oct 09:55 UTC</div>
       <h1>Rep Quality Scorer</h1>
     </div>
     <div class="status-row">
@@ -1722,15 +1722,25 @@ function coachingFor(slots) {
     // A pause well past target is the fault a client cannot feel happening, so it gets a
     // flash on top of the written coaching. Judged against the target rather than a fixed
     // 2.5s, because a set programmed with a 3s hold is not at fault for holding 3s.
-    const pauseLimit = Math.max(tgt.q1, tgt.q2) + LONG_PAUSE_OVER;
-    let worstPause = 0;
+    // Only an end where the load has come OFF the muscle. On a loaded end the score now says
+    // holding longer is free, and this flashed the screen to say the opposite — a 2.6s top
+    // hold on a pulldown scored 100 while being told to cut it short. It also reads each end
+    // against its own target instead of the longer of the two, so an asymmetric prescription
+    // is judged as prescribed. Both ends count when no machine is chosen, as before.
+    const limOf = end => (end === 'top' ? tgt.top : tgt.btm) + LONG_PAUSE_OVER;
+    let worstPause = 0, worstLimit = 0;
+    const consider = (v, end) => {
+      if (v !== null && v !== undefined && v > worstPause) { worstPause = v; worstLimit = limOf(end); }
+    };
     res.reps.forEach(r => {
-      [r.pause1Duration, r.pause2Duration].forEach(v => { if (v !== null && v > worstPause) worstPause = v; });
+      if (tgt.holdTop !== 'LOADED') consider(r.topPause, 'top');
+      if (tgt.holdBtm !== 'LOADED') consider(r.bottomPause, 'bottom');
     });
-    if (worstPause > pauseLimit) {
+    if (worstPause > worstLimit && worstLimit > 0) {
       longPauseNote.style.display = 'block';
       longPauseNote.textContent = 'Pause ran to ' + worstPause.toFixed(1) + 's — over '
-        + pauseLimit.toFixed(1) + 's. Long holds bleed tension and turn a controlled rep into two '
+        + worstLimit.toFixed(1) + 's, at an end where the load is off the muscle. Seconds spent '
+        + 'there are rest, not work: they bleed tension and turn a controlled rep into two '
         + 'separate lifts. Start the next phase as soon as the hold is reached.';
       flashOverlay.classList.remove('on');
       void flashOverlay.offsetWidth;            // restart the animation even on repeat sets
