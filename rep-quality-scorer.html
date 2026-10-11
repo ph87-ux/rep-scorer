@@ -209,7 +209,7 @@
 
   <header>
     <div>
-      <div class="brand">Prototype · velocity engine · build 08 Oct 21:39 UTC</div>
+      <div class="brand">Prototype · velocity engine · build 11 Oct 09:42 UTC</div>
       <h1>Rep Quality Scorer</h1>
     </div>
     <div class="status-row">
@@ -234,13 +234,23 @@
 
   <div class="panel set-hide stage-setup" id="panelTempo">
     <div class="panel-title">Target Tempo (seconds)</div>
-    <div style="font-size:11px;color:var(--dim);margin:-4px 0 10px;line-height:1.4;">Concentric raises the stack, eccentric lowers it — told apart by direction, not by which came first. Phases lose marks only for being <b>rushed</b>; slower than target costs nothing. Pauses are judged both ways, 20% either side free. A turnaround too short to measure is scored at the min-pause figure below, not skipped.</div>
+    <div style="font-size:11px;color:var(--dim);margin:-4px 0 10px;line-height:1.4;">Concentric raises the stack, eccentric lowers it — told apart by direction, not by which came first. Phases lose marks only for being <b>rushed</b>; slower than target costs nothing. Pauses are judged both ways. How much either phase may be off before it costs marks is set per phase under <b>Phase allowance</b> below. A turnaround too short to measure is scored at the min-pause figure in Debug, not skipped.</div>
     <div class="tempo-grid">
       <div class="tempo-field"><label>Concentric</label><input type="number" id="t1" value="4" step="0.5" min="0.5"></div>
       <div class="tempo-field"><label>Top pause</label><input type="number" id="p1" value="2" step="0.5" min="0"></div>
       <div class="tempo-field"><label>Eccentric</label><input type="number" id="t2" value="4" step="0.5" min="0.5"></div>
       <div class="tempo-field"><label>Btm pause</label><input type="number" id="p2" value="2" step="0.5" min="0"></div>
     </div>
+    <details style="margin-top:12px;">
+      <summary style="font-size:12px;color:var(--dim);cursor:pointer;">Phase allowance (%)</summary>
+      <div style="font-size:11px;color:var(--dim);margin:8px 0 10px;line-height:1.4;">How far off target a phase may be before it starts losing marks, as a percentage of that phase's target. Strokes are judged on the <b>fast side only</b> — slower than target never costs marks, whatever is set here. Pauses are judged both ways. Lower the number on a phase to hold it closer.</div>
+      <div class="tempo-grid">
+        <div class="tempo-field"><label>Concentric</label><input type="number" id="g1" value="10" step="1" min="0" max="100"></div>
+        <div class="tempo-field"><label>Top pause</label><input type="number" id="gp1" value="15" step="1" min="0" max="100"></div>
+        <div class="tempo-field"><label>Eccentric</label><input type="number" id="g2" value="20" step="1" min="0" max="100"></div>
+        <div class="tempo-field"><label>Btm pause</label><input type="number" id="gp2" value="15" step="1" min="0" max="100"></div>
+      </div>
+    </details>
     <details style="margin-top:12px;">
       <summary style="font-size:12px;color:var(--dim);cursor:pointer;">Phase weighting</summary>
       <div style="font-size:11px;color:var(--dim);margin:8px 0 10px;line-height:1.4;">How much each phase counts toward the set score. Equal by default. A weight of 0 drops a phase from the score entirely — use it on a machine where a hold is not prescribed. These change the score only; the phase times themselves are measured the same way whatever you put here.</div>
@@ -991,11 +1001,15 @@ function segmentBest(samples, opts) {
 // 15% of the target, so the allowance scales: 0.6s on a 4s contraction, 0.3s on a 2s one.
 // A fixed 0.2s was too tight on a long phase and too loose on a short one. The floor only
 // bites on very brief targets, where 15% would be finer than the measurement itself.
+// The default allowance when a caller does not name one. Every live caller now does: the
+// allowance is per phase, because the phases are not equally worth protecting. A coach who
+// cares most about the concentric wants it held closer than the lowering, and saying so in
+// one global number was not possible.
 const FAST_GRACE_FRAC = 0.15;
-function scorePhase(actual, target, tol) {
+function scorePhase(actual, target, tol, graceFrac) {
   if (actual >= target) return 100;              // slower than asked: no penalty, by design
   const err = target - actual;
-  const grace = Math.max(0.15, target * FAST_GRACE_FRAC);
+  const grace = Math.max(0.15, target * (graceFrac == null ? FAST_GRACE_FRAC : graceFrac));
   if (err <= grace) return 100;
   return Math.max(0, 100 - ((err - grace) / (tol * 2)) * 100);
 }
@@ -1004,37 +1018,28 @@ function scorePhase(actual, target, tol) {
 // so it keeps a symmetric band, 20% of the target either side. The 0.15s floor only bites on
 // very short targets, where 20% would otherwise be finer than the measurement itself.
 const PAUSE_BAND = 0.20;
-function scorePause(actual, target, tol) {
+function scorePause(actual, target, tol, graceFrac) {
   const err = Math.abs(actual - target);
-  const grace = Math.max(0.15, target * PAUSE_BAND);
+  const grace = Math.max(0.15, target * (graceFrac == null ? PAUSE_BAND : graceFrac));
   if (err <= grace) return 100;
   return Math.max(0, 100 - ((err - grace) / (tol * 2)) * 100);
 }
 
+// Turns each rep into the four direction-keyed slots the rest of the app reads. It used to
+// also compute a per-rep score here, which nothing ever read: the set score comes from
+// phaseSlots, on the phase averages. Worse, that dead scorer judged phase1 against the
+// CONCENTRIC target whatever direction phase1 actually was, so on a set beginning with a
+// lowering it compared the wrong phase to the wrong target. It is gone rather than fixed —
+// a scorer nobody reads is where the last scoring bug hid for a week.
 function scoreSet(seg, tgt) {
-  const TOL = tgt.tol;
   return seg.reps.map(r => {
-    const parts = [
-      scorePhase(r.phase1Duration, tgt.p1, TOL),
-      scorePhase(r.phase2Duration, tgt.p2, TOL)
-    ];
-    // A pause below the resolution floor is excluded rather than scored as if it were a real
-    // 0.2s hold — scoring an unmeasurable quantity is worse than leaving it out.
-    const minP = tgt.minPause;
-    if (r.pause1Duration !== null && r.pause1Duration >= minP) parts.push(scorePause(r.pause1Duration, tgt.q1, TOL));
-    if (r.pause2Duration !== null && r.pause2Duration >= minP) parts.push(scorePause(r.pause2Duration, tgt.q2, TOL));
-    // The score is tempo and nothing else. A smoothness term lived here, built from the jerk
-    // across each phase, and it was dropped: the sensor's own noise floor swamped it, so a
-    // mathematically perfect rep and a deliberately juddering one scored within a few points
-    // of each other. A number that cannot tell those apart is not worth a coach's attention.
-    const tempoScore = parts.reduce((a, b) => a + b, 0) / parts.length;
     // Name the four slots by DIRECTION rather than by order. On a selectorised stack the
     // working stroke always raises the weight, so an upward phase is the concentric wherever
     // it falls in the recording, and the pause that follows it is the one at the top. Keying
     // off "whichever came first" would silently swap every label on a set that happened to
     // begin with a lowering.
     const upFirst = r.p1.dir > 0;
-    return Object.assign({}, r, { tempoScore, composite: tempoScore,
+    return Object.assign({}, r, {
       concTravel:  upFirst ? r.p1.travel : r.p2.travel,
       eccTravel:   upFirst ? r.p2.travel : r.p1.travel,
       concentric:  upFirst ? r.phase1Duration : r.phase2Duration,
@@ -1317,8 +1322,18 @@ function coachingFor(slots) {
       // Weights are a coaching input, not a view this app holds. Equal by default, so the
       // score says nothing about which phase matters until somebody decides that it does.
       // || would swallow a deliberate 0, which is the one weight worth setting precisely.
-      wConc: wt('w1'), wTop: wt('wp1'), wEcc: wt('w2'), wBtm: wt('wp2')
+      wConc: wt('w1'), wTop: wt('wp1'), wEcc: wt('w2'), wBtm: wt('wp2'),
+      // As a fraction, because that is what the scorers take. A phase set to 0 allowance is
+      // judged from its target exactly; the 0.15s floor inside the scorers still applies, so
+      // a short target cannot be held finer than the segmenter can measure.
+      gConc: gr('g1', 0.15), gTop: gr('gp1', 0.20), gEcc: gr('g2', 0.15), gBtm: gr('gp2', 0.20)
     };
+  }
+  // An allowance field left blank falls back to the figure that phase used before it was
+  // configurable, so a half-filled form still scores the way it always did.
+  function gr(id, dflt) {
+    const v = parseFloat($(id).value);
+    return (isFinite(v) && v >= 0) ? v / 100 : dflt;
   }
   // A weight field left blank reads as 1; a weight of 0 means "do not score this phase".
   function wt(id) {
@@ -1479,10 +1494,10 @@ function coachingFor(slots) {
   function phaseSlots(res) {
     const t = res.targets;
     const defs = [
-      { label: 'Concentric', sub: 'stack rising',  key: 'concentric',  target: t.conc, pause: false, travelKey: 'concTravel', weight: t.wConc },
-      { label: 'Top pause',  sub: 'stack at top',  key: 'topPause',    target: t.top,  pause: true, flag: 'topUnresolved', weight: t.wTop },
-      { label: 'Eccentric',  sub: 'stack lowering',key: 'eccentric',   target: t.ecc,  pause: false, travelKey: 'eccTravel', weight: t.wEcc },
-      { label: 'Btm pause',  sub: 'stack at base', key: 'bottomPause', target: t.btm,  pause: true, flag: 'bottomUnresolved', weight: t.wBtm }
+      { label: 'Concentric', sub: 'stack rising',  key: 'concentric',  target: t.conc, pause: false, travelKey: 'concTravel', weight: t.wConc, grace: t.gConc },
+      { label: 'Top pause',  sub: 'stack at top',  key: 'topPause',    target: t.top,  pause: true, flag: 'topUnresolved', weight: t.wTop, grace: t.gTop },
+      { label: 'Eccentric',  sub: 'stack lowering',key: 'eccentric',   target: t.ecc,  pause: false, travelKey: 'eccTravel', weight: t.wEcc, grace: t.gEcc },
+      { label: 'Btm pause',  sub: 'stack at base', key: 'bottomPause', target: t.btm,  pause: true, flag: 'bottomUnresolved', weight: t.wBtm, grace: t.gBtm }
     ];
     const avg = v => v.reduce((a, b) => a + b, 0) / v.length;
     return defs.map(d => {
@@ -1496,7 +1511,8 @@ function coachingFor(slots) {
       const sd = shown.length
         ? Math.sqrt(shown.reduce((a, v) => a + (v - mean) * (v - mean), 0) / shown.length) : null;
       const jm = avg(judged);
-      const score = d.pause ? scorePause(jm, d.target, t.tol) : scorePhase(jm, d.target, t.tol);
+      const score = d.pause ? scorePause(jm, d.target, t.tol, d.grace)
+                            : scorePhase(jm, d.target, t.tol, d.grace);
       let travel = null;
       if (d.travelKey) {
         const tv = res.reps.map(r => r[d.travelKey]).filter(v => v !== null && v !== undefined);
@@ -1507,13 +1523,14 @@ function coachingFor(slots) {
     });
   }
 
-  function cell(label, val, target, tol, unresolved, isPause) {
+  function cell(label, val, target, tol, unresolved, isPause, grace) {
     if (val === null || val === undefined) return '<div class="pt"><span class="ptk">' + label + '</span><span class="ptv">—</span></div>';
     // Shown in full, but marked: the stroke boundaries either side of a pause this short are
     // not separable, so the figure is an artefact of where the threshold happened to fall.
     if (unresolved) return '<div class="pt" style="opacity:.55"><span class="ptk">' + label
       + '</span><span class="ptv" style="font-size:11px">&lt;' + tol.toFixed(1) + 's<br>unresolved</span></div>';
-    const cls = scoreClass(isPause ? scorePause(val, target, tol) : scorePhase(val, target, tol));
+    const cls = scoreClass(isPause ? scorePause(val, target, tol, grace)
+                                   : scorePhase(val, target, tol, grace));
     return '<div class="pt"><span class="ptk">' + label + '</span><span class="ptv ' + cls + '">' + val.toFixed(1) + 's</span></div>';
   }
 
@@ -1539,10 +1556,10 @@ function coachingFor(slots) {
         d.innerHTML =
           '<div class="rep-card-top"><div class="rep-num">REP ' + (i + 1) + '</div></div>' +
           '<div class="phase-times">' +
-            cell('CONC', r.concentric, tgt.conc, tgt.tol) +
-            cell('TOP', r.topPause, tgt.top, tgt.minPause, r.topUnresolved, true) +
-            cell('ECC', r.eccentric, tgt.ecc, tgt.tol) +
-            cell('BTM', r.bottomPause, tgt.btm, tgt.minPause, r.bottomUnresolved, true) +
+            cell('CONC', r.concentric, tgt.conc, tgt.tol, false, false, tgt.gConc) +
+            cell('TOP', r.topPause, tgt.top, tgt.minPause, r.topUnresolved, true, tgt.gTop) +
+            cell('ECC', r.eccentric, tgt.ecc, tgt.tol, false, false, tgt.gEcc) +
+            cell('BTM', r.bottomPause, tgt.btm, tgt.minPause, r.bottomUnresolved, true, tgt.gBtm) +
           '</div>';
         repList.appendChild(d);
       });
@@ -2295,6 +2312,10 @@ function coachingFor(slots) {
       // Carried so a score can be reproduced: the same set under different weights is a
       // different number, and without these there is no way to tell which one you are reading.
       weights: { concentric: t.wConc, topPause: t.wTop, eccentric: t.wEcc, bottomPause: t.wBtm },
+      // Carried for the same reason as the weights: the same set under a different allowance
+      // is a different number, and nothing else in the export would say which one this is.
+      allowancePct: { concentric: Math.round(t.gConc * 100), topPause: Math.round(t.gTop * 100),
+                      eccentric: Math.round(t.gEcc * 100), bottomPause: Math.round(t.gBtm * 100) },
       measured: {
         reps: res.reps.length,
         timeUnderTensionSeconds: res.tut !== null ? +res.tut.toFixed(1) : null,
