@@ -198,6 +198,9 @@
     padding:14px 16px; border-radius:12px; font-size:13px; line-height:1.45; margin-top:12px;
     display:none; font-weight:500; }
   .warn-note.bad { background:#FDECEA; color:#A32218; }
+  /* A finding in the client's favour, not a warning. Same shape so it sits with the others,
+     different colour so nobody reads a hard set as a problem with the set. */
+  .warn-note.good { background:#EAF7EC; color:#1F6B37; }
 
   canvas#trendCanvas { background:var(--bg) !important; }
   input[type=file] { font-size:12px; color:var(--dim); }
@@ -209,7 +212,7 @@
 
   <header>
     <div>
-      <div class="brand">Prototype · velocity engine · build 16 Oct 21:13 UTC</div>
+      <div class="brand">Prototype · velocity engine · build 16 Oct 21:54 UTC</div>
       <h1>Rep Quality Scorer</h1>
     </div>
     <div class="status-row">
@@ -339,7 +342,7 @@
       <label style="font-size:11px;color:var(--dim);display:block;margin-bottom:4px;">Re-analyse a saved recording (.csv)</label>
       <input type="file" id="csvIn" accept=".csv,text/csv" style="font-size:11px;color:var(--dim);width:100%;">
     </div>
-    <div style="font-size:11px;color:var(--dim);margin-top:8px;line-height:1.4;">The whole set is analysed when you press Stop, which lets it filter without lag and see each turnaround in context. Gravity and sensor noise are measured from your own recording — no per-machine setup.<br><br><b>Peak accel needs to be at least 3× threshold.</b> Below that, phase times read short rather than reps being missed outright, which is the one failure you cannot spot by eye — so it is called out above the score. Acceleration goes as stroke ÷ time², so halving the tempo costs four times the signal: <b>stroke in mm ≳ 10 × (phase seconds)²</b> on a firm mount, roughly 16× on a loose one. At a 4&nbsp;s tempo that is about 160&nbsp;mm firm, 250&nbsp;mm loose. Mount rigidity moves this more than anything else here. Pauses shorter than about 0.6&nbsp;s cannot be separated from the strokes either side.</div>
+    <div style="font-size:11px;color:var(--dim);margin-top:8px;line-height:1.4;">The whole set is analysed when you press Stop, which lets it filter without lag and see each turnaround in context. Gravity and sensor noise are measured from your own recording — no per-machine setup.<br><br><b>Peak accel needs to be at least 3× threshold.</b> Below that, phase times read short rather than reps being missed outright, which is the one failure you cannot spot by eye — so it is called out above the score. Acceleration goes as stroke ÷ time², so halving the tempo costs four times the signal: <b>stroke in mm ≳ 10 × (phase seconds)²</b> on a firm mount, roughly 16× on a loose one. At a 4&nbsp;s tempo that is about 160&nbsp;mm firm, 250&nbsp;mm loose. Mount rigidity moves this more than anything else here. A turnaround held for more than 0.25&nbsp;s is seen; below that the end of one stroke and the start of the next are the same push, and the hold is scored at 0.25&nbsp;s — the longest it could have been and still gone unmeasured.</div>
     </details>
   </div>
 
@@ -353,6 +356,7 @@
       <div id="engineNote" style="display:none;font-size:12px;color:var(--warn);margin-top:6px;font-weight:600;"></div>
     </div>
     <div id="phaseAverages"></div>
+    <div class="warn-note good" id="effortNote"></div>
     <div class="coach-line" id="coachLine" style="display:none;"></div>
     <div class="warn-note" id="longPauseNote"></div>
   </div>
@@ -1158,7 +1162,7 @@ function coachingFor(slots) {
   const errBox = $('errBox'), phaseBig = $('phaseBig'), phaseTime = $('phaseTime'), tempoFill = $('tempoFill');
   const summaryNum = $('summaryNum'), summaryLbl = $('summaryLbl'), repList = $('repList');
   const flashOverlay = $('flashOverlay'), coachLine = $('coachLine'), weakSignalNote = $('weakSignalNote');
-  const longPauseNote = $('longPauseNote');
+  const longPauseNote = $('longPauseNote'), effortNote = $('effortNote');
   const LONG_PAUSE_OVER = 0.5;   // seconds past the pause target before it is called out
   // Measured on simulated sets: at 3x the threshold phase times are exact, at 2.6x they
   // start to wander, and below 2x they are wrong without looking wrong.
@@ -1206,6 +1210,74 @@ function coachingFor(slots) {
     if (step < RANGE_STEP_MIN) return null;
     return { atStroke: best.k, beforeMm: best.a * 1000, afterMm: best.b * 1000,
              withinPct: best.worse * 100, stepPct: step * 100 };
+  }
+
+  // Training to momentary muscular failure shows up as the concentric getting slower rep by
+  // rep against the same load: the client is pushing as hard at the end as at the start and
+  // the stack moves less for it. That is the sign of a set worth doing, and the scorer must
+  // not read it as a fault. It already does not — the concentric has no slow side, so a rep
+  // that runs long costs nothing there. What it DID cost is the eccentric: a client who can
+  // barely finish the lift lowers under control and takes longer doing it, and the slow
+  // eccentric penalty docked a real near-failure set 12 points for exactly that. So a set
+  // carrying this signature has its eccentric slow side waived.
+  //
+  // Reported, never rewarded. A bonus would be gameable — lift slowly on purpose and collect
+  // marks — and it would conflate two different questions: the score says whether the set was
+  // lifted as prescribed, this says how hard it was worked. The coach wants both, separately.
+  //
+  // The waiver itself is close to self-limiting, which is the reason it can be given away on a
+  // measurement rather than on a trainer's word. Faking the ramp means making the EARLY reps
+  // fast, and the concentric's fast side charges for those: on the real near-failure set the
+  // first reps at 2.7s against a 4s target already cost the concentric 10 points, more than
+  // the 12 the waiver handed back across a quarter-weighted phase. A client cannot ramp into
+  // the exemption without paying for it on the way in.
+  //
+  // Two conditions, because either alone is something else. The RISE says the end of the set
+  // is meaningfully slower than the start, measured first-two against last-two so that one
+  // slow rep cannot carry it. The RANK CORRELATION says it got there in order, rep after rep,
+  // rather than in one jump: a set that is steady until the client stumbles on the last rep is
+  // not a fatigue ramp, and nor is one that starts slow and speeds up. The thresholds were set
+  // on a synthetic ramp and are held at the first real set reported as taken to failure — that
+  // one ran +72% with a rank correlation of 0.72, clearing both by a margin small enough that
+  // loosening them further would start admitting noise.
+  const FATIGUE_RISE_MIN = 0.15;   // how much longer the last reps must take than the first
+  const FATIGUE_RHO_MIN = 0.70;    // and how closely that rise has to follow rep order
+  const FATIGUE_MIN_REPS = 6;      // below this a trend cannot be told from two long reps
+  function fatigueOf(res) {
+    // Only on the velocity engine, and only on a set that read as reps at all. The fallback
+    // engine's durations are not accurate enough for a 15% trend to mean anything, and on an
+    // unreadable set the concentric is not reliably the concentric.
+    if (!res.seg || res.seg.method !== 'velocity' || res.unreadable) return null;
+    const d = (res.reps || []).map(r => r.concentric)
+                              .filter(v => v !== null && v !== undefined && v > 0);
+    if (d.length < FATIGUE_MIN_REPS) return null;
+    const N = d.length;
+    const first = (d[0] + d[1]) / 2, last = (d[N - 1] + d[N - 2]) / 2;
+    if (!(first > 0)) return null;
+    const rise = (last - first) / first;
+    if (rise < FATIGUE_RISE_MIN) return null;
+    // Spearman: Pearson on the ranks, ties averaged, against rep order. Ranks rather than raw
+    // durations because the shape of the ramp is not the claim — only that it goes one way.
+    const ord = d.map((v, i) => i).sort((a, b) => d[a] - d[b]);
+    const rank = new Array(N);
+    for (let i = 0; i < N; ) {
+      let j = i;
+      while (j + 1 < N && d[ord[j + 1]] === d[ord[i]]) j++;
+      const r = (i + j) / 2 + 1;
+      for (let k = i; k <= j; k++) rank[ord[k]] = r;
+      i = j + 1;
+    }
+    const mr = rank.reduce((a, b) => a + b, 0) / N, mi = (N - 1) / 2;
+    let num = 0, dr = 0, di = 0;
+    for (let i = 0; i < N; i++) {
+      num += (rank[i] - mr) * (i - mi);
+      dr += (rank[i] - mr) * (rank[i] - mr);
+      di += (i - mi) * (i - mi);
+    }
+    if (!(dr > 0 && di > 0)) return null;
+    const rho = num / Math.sqrt(dr * di);
+    if (rho < FATIGUE_RHO_MIN) return null;
+    return { reps: N, risePct: rise * 100, rho: rho, firstSeconds: first, lastSeconds: last };
   }
   // How far the stack must actually move for a phase time to mean anything. The spread check
   // above asks whether the reps agree with each other, which a client doing consistently tiny
@@ -1625,13 +1697,21 @@ function coachingFor(slots) {
   // still contributes nothing.
   function phaseSlots(res) {
     const t = res.targets;
+    // Computed here rather than passed in, so every reader of the slots — the screen, the
+    // export, the pasted text — sees the same eccentric. A set shown as exempt on screen and
+    // filed as penalised would be worse than either answer on its own.
+    const fat = fatigueOf(res);
+    const eccSlow = fat ? null : t.sEcc;
     const defs = [
       { label: 'Concentric', sub: 'stack rising',  key: 'concentric',  target: t.conc, pause: false, travelKey: 'concTravel', weight: t.wConc, grace: t.gConc, slow: t.sConc },
       { label: 'Top pause',  sub: 'stack at top',  key: 'topPause',    target: t.top,  pause: true, flag: 'topNoHold', weight: t.wTop, grace: t.gTop,
         // LOADED: the muscle is still carrying the stack, so a long hold is more work, not a
         // fault. REST, or no machine chosen: judged both ways as before.
         longGrace: t.holdTop === 'LOADED' ? null : t.gTop, hold: t.holdTop },
-      { label: 'Eccentric',  sub: 'stack lowering',key: 'eccentric',   target: t.ecc,  pause: false, travelKey: 'eccTravel', weight: t.wEcc, grace: t.gEcc, slow: t.sEcc },
+      { label: 'Eccentric',  sub: 'stack lowering',key: 'eccentric',   target: t.ecc,  pause: false, travelKey: 'eccTravel', weight: t.wEcc, grace: t.gEcc, slow: eccSlow,
+        // Set only where the waiver actually changed something: with no slow side configured
+        // there was nothing to waive, and saying so would claim a leniency that is not there.
+        slowWaived: !!(fat && t.sEcc != null) },
       { label: 'Btm pause',  sub: 'stack at base', key: 'bottomPause', target: t.btm,  pause: true, flag: 'bottomNoHold', weight: t.wBtm, grace: t.gBtm,
         longGrace: t.holdBtm === 'LOADED' ? null : t.gBtm, hold: t.holdBtm }
     ];
@@ -1682,6 +1762,10 @@ function coachingFor(slots) {
     $('rawBtn').style.display = 'block';
     $('jsonBtn').style.display = 'block';
     const tgt = res.targets;
+    // The same waiver the phase row applies, so a rep's eccentric is not coloured red in the
+    // card above a row that scored the phase 100.
+    const fat = fatigueOf(res);
+    const eccSlowShown = fat ? null : tgt.sEcc;
     repList.innerHTML = '';
     if (!res.reps.length) {
       repList.innerHTML = '<div class="empty-note">No reps detected this set.</div>';
@@ -1695,7 +1779,7 @@ function coachingFor(slots) {
             cell('CONC', r.concentric, tgt.conc, tgt.tol, false, false, tgt.gConc, tgt.sConc) +
             cell('TOP', r.topPause, tgt.top, tgt.minPause, r.topNoHold, true, tgt.gTop, null,
                  tgt.holdTop === 'LOADED' ? null : tgt.gTop) +
-            cell('ECC', r.eccentric, tgt.ecc, tgt.tol, false, false, tgt.gEcc, tgt.sEcc) +
+            cell('ECC', r.eccentric, tgt.ecc, tgt.tol, false, false, tgt.gEcc, eccSlowShown) +
             cell('BTM', r.bottomPause, tgt.btm, tgt.minPause, r.bottomNoHold, true, tgt.gBtm, null,
                  tgt.holdBtm === 'LOADED' ? null : tgt.gBtm) +
           '</div>';
@@ -1719,12 +1803,30 @@ function coachingFor(slots) {
         + (s.n > 1 ? ' · spread ±' + s.sd.toFixed(1) + 's' : '')
         + (s.hold === 'LOADED' ? ' · loaded, holding longer is free'
            : s.hold === 'REST' ? ' · rest, judged both ways' : '')
+        + (s.slowWaived ? ' · slow side waived, set reads as near failure' : '')
         + (weightOf(s) !== 1 ? ' · weight ×' + weightOf(s) : '')
         + (s.skipped ? ' · ' + s.skipped + ' with no pause at all' : '')
         + (s.travel ? ' · travel ~' + (s.travel * 1000).toFixed(0) + 'mm' : '') + '</span></span>'
         + '<span class="pa-time">' + timeTxt + '</span>'
         + '<span class="pa-score ' + scoreClass(s.score) + '">' + s.score.toFixed(0) + '</span></div>';
     }).join('');
+
+    // Said plainly and separately from the score, because it is the one thing on this screen
+    // that is about effort rather than compliance. The numbers are the measured means, not the
+    // thresholds: a coach reading "2.9s to 5.0s" can check it against what they watched.
+    if (fat) {
+      effortNote.style.display = 'block';
+      effortNote.textContent = 'The concentric slowed through the set: about '
+        + fat.firstSeconds.toFixed(1) + 's on the first two reps and ' + fat.lastSeconds.toFixed(1)
+        + 's on the last two, a ' + fat.risePct.toFixed(0) + '% rise, and it rose in rep order '
+        + 'rather than in one jump. Against an unchanged load that is what a set taken to or '
+        + 'near failure looks like — the client kept pushing and the stack moved less for it. '
+        + 'This adds no marks: the score says whether the set was lifted as prescribed, this '
+        + 'says how hard it was worked, and they are worth keeping apart.'
+        + (eccSlowShown === null && tgt.sEcc != null
+           ? ' The slow allowance on the lowering is waived for this set, so a controlled '
+             + 'eccentric that ran long is not marked down for it.' : '');
+    } else effortNote.style.display = 'none';
 
     // On a machine the stack returns to the same place every rep, so the concentric and the
     // eccentric cover the SAME distance. Physics guarantees it in a way no calibration can,
@@ -2270,7 +2372,7 @@ function coachingFor(slots) {
     summaryNum.textContent = '—'; summaryLbl.textContent = 'recording';
     $('phaseAverages').innerHTML = '';
     coachLine.style.display = 'none'; weakSignalNote.style.display = 'none';
-    longPauseNote.style.display = 'none';
+    longPauseNote.style.display = 'none'; effortNote.style.display = 'none';
     statusText.textContent = 'recording'; signalText.textContent = 'signal —';
     startSetBtn.style.display = 'none'; stopSetBtn.style.display = 'block';
     document.body.classList.add('set-running');
@@ -2315,7 +2417,8 @@ function coachingFor(slots) {
     $('dbgNoise').textContent = '—'; $('dbgGRef').textContent = 'g —';
     $('dbgThresh').textContent = '—'; $('dbgAPeak').textContent = '—';
     coachLine.style.display = 'none'; weakSignalNote.style.display = 'none';
-    longPauseNote.style.display = 'none'; $('copyBtn').style.display = 'none';
+    longPauseNote.style.display = 'none'; effortNote.style.display = 'none';
+    $('copyBtn').style.display = 'none';
     $('rawBtn').style.display = 'none';
     $('jsonBtn').style.display = 'none';
     signalText.textContent = 'signal —';
@@ -2406,6 +2509,7 @@ function coachingFor(slots) {
       lines.push('', '( ! = pause below the resolution floor, not a measurement )');
     if (weakSignalNote.style.display === 'block') lines.push('', 'WARNING: ' + weakSignalNote.textContent);
     if (longPauseNote.style.display === 'block') lines.push('', 'NOTE: ' + longPauseNote.textContent);
+    if (effortNote.style.display === 'block') lines.push('', 'EFFORT: ' + effortNote.textContent);
     if (coachLine.style.display === 'block') lines.push('', coachLine.textContent);
     const text = lines.join('\n');
     const done = () => { copyBtn.textContent = 'Copied'; setTimeout(function(){ copyBtn.textContent = 'Copy results'; }, 1600); };
@@ -2426,6 +2530,7 @@ function coachingFor(slots) {
   function resultRecord(res) {
     const s = res.seg, t = res.targets;
     const slots = phaseSlots(res);
+    const fat = fatigueOf(res);
     const by = n => slots.find(x => x.label === n) || {};
     const ratio = s.thr > 0 ? s.peak / s.thr : 0;
     const cS = by('Concentric'), eS = by('Eccentric');
@@ -2489,7 +2594,21 @@ function coachingFor(slots) {
         qualityScore: score !== null ? Math.round(score) : null,
         weakestPhaseScore: rated.length ? Math.round(Math.min.apply(null, rated.map(x => x.score))) : null,
         phases: { concentric: phase('Concentric'), topPause: phase('Top pause'),
-                  eccentric: phase('Eccentric'), bottomPause: phase('Btm pause') }
+                  eccentric: phase('Eccentric'), bottomPause: phase('Btm pause') },
+        // Effort, kept out of the score on purpose. null means the set did not carry the
+        // signature, which is not the same as the client not having worked — a set can be
+        // taken to failure in six hard reps that are all the same speed. It only ever says
+        // what was measured. slowEccentricPenaltyWaived is the one place it touched the
+        // score, and it travels with it so the number can be reproduced.
+        effort: fat ? {
+          readsAsNearFailure: true,
+          concentricRampPct: Math.round(fat.risePct),
+          rankCorrelation: +fat.rho.toFixed(2),
+          firstRepsSeconds: +fat.firstSeconds.toFixed(2),
+          lastRepsSeconds: +fat.lastSeconds.toFixed(2),
+          repsConsidered: fat.reps,
+          slowEccentricPenaltyWaived: t.sEcc != null
+        } : null
       },
       quality: {
         trustworthy: fails.length === 0,

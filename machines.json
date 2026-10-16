@@ -143,9 +143,8 @@
       "bottomHold": "LOADED",
       "stackTravelMm": null,
       "targetTempo": null,
-      "notes": "Single joint through the spine, no position where a limb can lock out, so the top hold is LOADED by the same reasoning as the other single-joint machines. Bottom set to LOADED by the coached-hover policy. Flagged for confirmation because the START position is the doubtful one: on some trunk flexion machines the client sits back against the frame at full extension and the stack rests, which would shed the load and make the bottom REST. A set recorded on this machine on 8 October ran 20 of 23 turnarounds with no pause at all, so neither hold has yet been observed held.",
-      "needsConfirmation": true,
-      "openQuestion": "At the upright start position, if the client completely relaxed, would the stack move? If the frame or the seat takes the load there, bottomHold is REST."
+      "notes": "Single joint through the spine, no position where a limb can lock out, so the top hold is LOADED by the same reasoning as the other single-joint machines. The START position was the doubtful one: on some trunk flexion machines the client sits back against the frame at full extension and the stack rests there, which would shed the load and make the bottom REST. Confirmed by the coach on 16 October that the stack would drop if the client relaxed at the upright start, so the bottom is LOADED too and both ends may be held as long as the client likes. A set recorded on this machine on 8 October ran 20 of 23 turnarounds with no pause at all, so neither hold has yet been observed held.",
+      "needsConfirmation": false
     }
   ],
   "coaching": {
