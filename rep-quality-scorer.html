@@ -209,7 +209,7 @@
 
   <header>
     <div>
-      <div class="brand">Prototype · velocity engine · build 11 Oct 09:55 UTC</div>
+      <div class="brand">Prototype · velocity engine · build 16 Oct 12:20 UTC</div>
       <h1>Rep Quality Scorer</h1>
     </div>
     <div class="status-row">
@@ -1214,23 +1214,51 @@ function coachingFor(slots) {
   // rather than inlined so there is one copy to edit, and every failure path leaves the app
   // exactly as it was without it: no machine selected means the configured allowances apply
   // to both ends, which is what the app did before the file was read at all.
-  let MACHINES = [];
+  // The same eleven, inlined. machines.json stays the source of truth and is read in
+  // preference to this, but a fetch has a dozen ways to fail — offline, opened as a file, a
+  // stale cache, a host that will not serve .json — and every one of them failed SILENTLY:
+  // the list came up empty, no error appeared, and every hold went back to being judged both
+  // ways as though no rule existed. A quiet reversion to the old scoring during a trial is
+  // the worst outcome available, so the rules ship inside the page as well.
+  // Regenerate from machines.json whenever a hold classification there changes; only the four
+  // fields the app actually reads are copied.
+  const MACHINES_BUILTIN = [
+    {code:'B1', name:"Leg Extension", topHold:'LOADED', bottomHold:'LOADED'},
+    {code:'B5', name:"Leg Curl", topHold:'LOADED', bottomHold:'LOADED'},
+    {code:'B7', name:"Leg Curl (seated)", topHold:'LOADED', bottomHold:'LOADED'},
+    {code:'B8', name:"Tibialis Dorsi Flexion", topHold:'LOADED', bottomHold:'LOADED'},
+    {code:'B6', name:"Leg Press", topHold:'REST', bottomHold:'LOADED'},
+    {code:'D6', name:"Chest Press", topHold:'REST', bottomHold:'LOADED'},
+    {code:'D7', name:"Seated Dip", topHold:'REST', bottomHold:'LOADED'},
+    {code:'E3', name:"Overhead Press (front grip)", topHold:'REST', bottomHold:'LOADED'},
+    {code:'E1', name:"Overhead Press (rear grip)", topHold:'REST', bottomHold:'LOADED'},
+    {code:'C7', name:"Row", topHold:'LOADED', bottomHold:'LOADED'},
+    {code:'C3', name:"Pulldown", topHold:'LOADED', bottomHold:'LOADED'}
+  ];
+  let MACHINES = MACHINES_BUILTIN;
   function machineByCode(code) {
     for (const m of MACHINES) if (m.code === code) return m;
     return null;
   }
+  function fillMachines() {
+    const sel = $('machineIn'), keep = sel.value;
+    while (sel.options.length > 1) sel.remove(1);
+    for (const m of MACHINES) {
+      const o = document.createElement('option');
+      o.value = m.code; o.textContent = m.code + ' — ' + m.name;
+      sel.appendChild(o);
+    }
+    sel.value = keep;                          // a machine chosen before the file landed stays chosen
+  }
   (function loadMachines() {
+    fillMachines();                            // never leave the list empty
     if (typeof fetch !== 'function') return;
     fetch('machines.json').then(r => r.ok ? r.json() : null).then(d => {
-      if (!d || !Array.isArray(d.machines)) return;
-      MACHINES = d.machines;
-      const sel = $('machineIn');
-      for (const m of MACHINES) {
-        const o = document.createElement('option');
-        o.value = m.code; o.textContent = m.code + ' — ' + m.name;
-        sel.appendChild(o);
+      if (d && Array.isArray(d.machines) && d.machines.length) {
+        MACHINES = d.machines;                 // the file wins where it can be read
+        fillMachines();
       }
-    }).catch(function () { /* offline, or opened as a file: the app works without it */ });
+    }).catch(function () { /* the built-in list is already in place */ });
   })();
   const trendCanvas = $('trendCanvas'), trendCtx = trendCanvas.getContext('2d');
   const ringArc = $('ringArc'), ringCue = $('ringCue'), ringCount = $('ringCount'), ringRep = $('ringRep');
