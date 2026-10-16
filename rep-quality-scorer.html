@@ -212,7 +212,7 @@
 
   <header>
     <div>
-      <div class="brand">Prototype · velocity engine · build 16 Oct 22:27 UTC</div>
+      <div class="brand">Prototype · velocity engine · build 16 Oct 22:33 UTC</div>
       <h1>Rep Quality Scorer</h1>
     </div>
     <div class="status-row">
@@ -1260,25 +1260,33 @@ function coachingFor(slots) {
   // about 10 x (phase seconds)^2 on a firm mount, nearer 16x on a compliant one — and then
   // nothing ever applied it, which cost a real set the right answer.
   //
-  // An elbow flexion set recorded at 4-2-4-2 came back with 89% travel scatter and was told
-  // that the usual causes are the stack being dropped onto its own weight or the phone moving
-  // in its cradle. Neither is likely. That machine's stroke measured about 150mm, and at four
-  // seconds the rule wants 160mm on a firm mount and 256mm on a mount as compliant as its
-  // signal ratio implied. The set was not mis-mounted; it was prescribed a tempo its stroke
-  // cannot carry. Sending the coach to check a cradle that was fine is the worst kind of
-  // wrong answer, because it looks like help.
-  //
   // Judged against the SLOWER of the two stroke targets, since that is the one that runs out
   // of signal first, and against the median stroke, so one short rep cannot trigger it.
+  //
+  // ONLY ON A SET WHOSE STROKES AGREE WITH EACH OTHER, and that gate was learned the hard way
+  // within the hour. The first version ran on any set and offered the tempo as the likely
+  // cause where a set had been refused for travel scatter. On the elbow flexion set that
+  // prompted it, it reported a 107mm stroke and advised dropping to 2.5s. Both were wrong. The
+  // middle of that recording reads 262, 290, 311 and 251mm with clean alternation, so the
+  // machine's real stroke is about 280mm and the prescribed 4s needs 160mm — comfortably
+  // inside. The 107mm was the median of a set whose strokes were SPLITTING, and a median taken
+  // across fragments measures the fragments.
+  //
+  // So the check now refuses to speak where the travel measurement has already failed. A set
+  // that cannot measure its own stroke cannot be asked how long that stroke should take, and
+  // telling a coach to rewrite a prescription on the strength of it is exactly the wrong
+  // answer that looks like help this was written to stop.
   //
   // Deliberately NOT added to failedChecks, and `trustworthy` is left alone. This is a rule of
   // thumb carried in the help text, not a gate anything has validated, and `trustworthy` has a
   // precise meaning that should not be diluted by a heuristic. It is loud on screen and it
   // publishes its numbers; promote it to a hard check when a set proves it needs to be.
-  // 10 and not 16. The two real machines bracket it: the pulldown reads correctly at 244mm
-  // against a 4s stroke, where 16x would want 256mm and would condemn a set that measured its
-  // travel to within 3% of a tape measure; the curl fails at about 150mm, where 10x wants 160.
-  // A constant that flags the set which works is worse than useless.
+  // 10 and not 16, on one real machine rather than the two first claimed: the pulldown reads
+  // correctly at 244mm against a 4s stroke, and 16x would want 256mm and condemn a set whose
+  // travel matched a tape measure to 3%. A constant that flags the set which works is worse
+  // than useless. The elbow flexion set was offered as the other half of that bracket and is
+  // not — its stroke is about 280mm and it clears either constant. So this is one-sided
+  // evidence: there is a machine it must not flag, and as yet none it must.
   const SIGNAL_MM_PER_S2 = 10;     // firm mount; a compliant one needs about 16
   // The trigger fires AT the limit, but advice given at the limit is no advice — it hands back
   // a tempo with no margin, which is how the set got here. The suggestion carries half as much
@@ -1468,7 +1476,9 @@ function coachingFor(slots) {
     {code:'C1', name:"Pullover", topHold:'LOADED', bottomHold:'LOADED', unilateral:true},
     {code:'C7', name:"Row", topHold:'LOADED', bottomHold:'LOADED'},
     {code:'C3', name:"Pulldown", topHold:'LOADED', bottomHold:'LOADED'},
-    {code:'F2.1', name:"Trunk Flexion", topHold:'LOADED', bottomHold:'LOADED'}
+    {code:'F1.1', name:"Trunk Rotation", topHold:'LOADED', bottomHold:'LOADED', unilateral:true},
+    {code:'F2.1', name:"Trunk Flexion", topHold:'LOADED', bottomHold:'LOADED'},
+    {code:'H1', name:"Curl", topHold:'LOADED', bottomHold:'LOADED'}
   ];
   let MACHINES = MACHINES_BUILTIN;
   function machineByCode(code) {
@@ -2120,10 +2130,24 @@ function coachingFor(slots) {
       const v = (seg.phases || []).map(p => p.travel).filter(x => x > 0).sort((a, b) => a - b);
       return v.length ? v[v.length >> 1] * 1000 : null;
     })();
-    // Only where the absolute floor has not already caught it: below 100mm the set is refused
-    // outright and a second explanation of the same fact would only crowd the first.
-    const headroom = (velMethod && medTravel != null && medTravel >= TRAVEL_MIN_MM)
+    // The longest stroke in the set, which is what says whether a short median is the machine
+    // or the measurement. A machine with a genuinely short range has a short longest stroke
+    // too; a set whose strokes are splitting keeps the full ones and adds fragments below them.
+    const maxTravel = (function () {
+      const v = (seg.phases || []).map(p => p.travel).filter(x => x > 0);
+      return v.length ? Math.max.apply(null, v) * 1000 : null;
+    })();
+    // Two gates, not one. The absolute floor, because below 100mm the set is refused outright
+    // and a second explanation of the same fact would only crowd the first. And the spread,
+    // because a median taken across a set that could not measure its own stroke is not a
+    // measurement of the machine — see the note on tempoHeadroom for what that cost.
+    const travelUsable = spread != null && spread <= TRAVEL_SPREAD_BAD;
+    const headroom = (velMethod && travelUsable && medTravel != null && medTravel >= TRAVEL_MIN_MM)
       ? tempoHeadroom(medTravel, tgt) : null;
+    // Strokes that split read as two phases in the same direction. A clean set alternates
+    // perfectly, so anything below 1 is fragments, and it is worth saying out loud because it
+    // is the one failure that makes a machine look like it has a shorter range than it has.
+    const splitFrac = seg.alternation == null ? 1 : seg.alternation;
     if (velMethod && medTravel != null && medTravel < TRAVEL_MIN_MM) {
       noteBad = true;
       note = 'The stack only moved about ' + medTravel.toFixed(0) + 'mm per rep, which is too '
@@ -2137,15 +2161,18 @@ function coachingFor(slots) {
         + (spread * 100).toFixed(0) + '%, and no single point in the set divides it into two '
         + 'consistent halves, so it is not a range that changed — it is scattered rep to rep. '
         + 'A stack moving through its fixed range should repeat to within about 15%. '
-        // The tempo cause goes first where it applies, because it is the specific one and the
-        // mechanical ones would send the coach to check a rig that is working.
-        + (headroom
-            ? 'The likely cause here is the tempo rather than the rig: this stroke measures about '
-              + headroom.haveMm.toFixed(0) + 'mm, and timing a ' + headroom.slowestTarget.toFixed(1)
-              + 's phase needs about ' + headroom.needMm.toFixed(0) + 'mm, because the signal '
-              + 'falls as the square of how long the stroke takes. Try this machine nearer '
-              + headroom.workableSeconds.toFixed(2).replace(/0$/, '') + 's a stroke before '
-              + 'suspecting the mount. '
+        // Splitting goes first where it applies, because it is the specific cause and it also
+        // explains why the travel figures on this screen read short — which would otherwise
+        // send the coach off to shorten a prescription that was never the problem.
+        + (splitFrac < 1 && maxTravel != null && medTravel != null && maxTravel > medTravel * 1.8
+            ? 'The likely cause is strokes being split rather than a short range: '
+              + ((1 - splitFrac) * 100).toFixed(0) + '% of the turnarounds read as two strokes '
+              + 'in the same direction, which real reps never do, and the longest stroke here '
+              + 'reaches ' + maxTravel.toFixed(0) + 'mm against a median of '
+              + medTravel.toFixed(0) + 'mm. That is one movement being broken into pieces, not '
+              + 'a machine with a short range — a slow stroke whose middle is nearly at '
+              + 'constant speed produces almost no acceleration to see, so a weak signal loses '
+              + 'it there. Mount more rigidly, or try this machine at a quicker tempo. '
             : 'The usual causes are the stack being dropped onto its own weight at the bottom, '
               + 'or the phone moving in its cradle. ')
         + 'Treat these phase times as unusable.';
@@ -2893,10 +2920,17 @@ function coachingFor(slots) {
         // null means there is enough. Reported, never counted against the set — see the note
         // on tempoHeadroom for why this is not a failed check.
         tempoHeadroom: (function () {
-          const h = velMethod && mt != null && mt >= TRAVEL_MIN_MM ? tempoHeadroom(mt, t) : null;
+          const ok = s.travelCV != null && s.travelCV <= TRAVEL_SPREAD_BAD;
+          const h = velMethod && ok && mt != null && mt >= TRAVEL_MIN_MM ? tempoHeadroom(mt, t) : null;
           return h ? { strokeMm: Math.round(h.haveMm), neededMm: Math.round(h.needMm),
                        slowestTargetSeconds: h.slowestTarget,
                        workableStrokeSeconds: h.workableSeconds } : null;
+        })(),
+        // The longest stroke beside the median. Far apart means the set is carrying fragments
+        // of strokes, and that the median understates the machine.
+        longestStrokeMm: (function () {
+          const v = (s.phases || []).map(p => p.travel).filter(x => x > 0);
+          return v.length ? Math.round(Math.max.apply(null, v) * 1000) : null;
         })(),
         signalRatio: +ratio.toFixed(1),
         alternationPct: Math.round((s.alternation || 0) * 100),

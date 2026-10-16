@@ -137,6 +137,18 @@
       "needsConfirmation": false
     },
     {
+      "code": "F1.1",
+      "name": "Trunk Rotation",
+      "topHold": "LOADED",
+      "bottomHold": "LOADED",
+      "stackTravelMm": null,
+      "targetTempo": null,
+      "notes": "Single joint through the spine, rotation rather than flexion, so it is classified with F2.1 and the other single-joint machines: no position where a limb can lock out, so the top is LOADED, and the bottom is LOADED by the coached-hover policy. Worked one side at a time, and left and right are recorded separately because rotation to each side is different work and averaging them would hide the asymmetry that is the point of measuring it. Flagged for confirmation on the same question F2.1 was flagged for and for the same reason: the START position is the doubtful one. If the client comes back to square against a pad or a stop and the stack can rest there, the bottom is REST.",
+      "needsConfirmation": true,
+      "openQuestion": "At the untwisted start position, if the client completely relaxed, would the stack move? If a pad or a stop takes the load there, bottomHold is REST. F2.1 was answered LOADED, but that answer was about a seat back on a flexion machine and does not carry over on its own.",
+      "unilateral": true
+    },
+    {
       "code": "F2.1",
       "name": "Trunk Flexion",
       "topHold": "LOADED",
@@ -144,6 +156,16 @@
       "stackTravelMm": null,
       "targetTempo": null,
       "notes": "Single joint through the spine, no position where a limb can lock out, so the top hold is LOADED by the same reasoning as the other single-joint machines. The START position was the doubtful one: on some trunk flexion machines the client sits back against the frame at full extension and the stack rests there, which would shed the load and make the bottom REST. Confirmed by the coach on 16 October that the stack would drop if the client relaxed at the upright start, so the bottom is LOADED too and both ends may be held as long as the client likes. A set recorded on this machine on 8 October ran 20 of 23 turnarounds with no pause at all, so neither hold has yet been observed held.",
+      "needsConfirmation": false
+    },
+    {
+      "code": "H1",
+      "name": "Curl",
+      "topHold": "LOADED",
+      "bottomHold": "LOADED",
+      "stackTravelMm": null,
+      "targetTempo": null,
+      "notes": "Single joint through the elbow, confirmed by the coach as the machine behind the 21:19 set on 16 October. Same loaded profile as B7 and C1: at full flexion there is no position where the skeleton can take the load, so the top is LOADED, and the bottom is a coached hover and stays loaded too. Stroke measured about 280mm from the four strokes in that recording that read cleanly, which is ample for the estate tempo — an earlier reading of 107mm was the median of a set whose strokes were splitting, not the machine. Whether it can be worked one arm at a time has not been asked.",
       "needsConfirmation": false
     }
   ],
