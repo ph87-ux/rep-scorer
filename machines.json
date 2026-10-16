@@ -112,10 +112,9 @@
       "bottomHold": "LOADED",
       "stackTravelMm": null,
       "targetTempo": null,
-      "notes": "Classified by the file's own push/pull rule rather than from a recording: a pullover is a PULL, so there is no lockout and the lat holds the load at the shortest position, exactly as on C7 Row and C3 Pulldown. Bottom is a coached hover and stays loaded. Flagged for confirmation because the rule was applied to a machine nobody has described here, not because the rule is in doubt.",
+      "notes": "Single joint, confirmed by the coach as carrying the same loaded profile as B7: the muscle holds the load at both ends and no position lets the frame or the skeleton take it. Recorded here because the first classification reached the right answer by the wrong route — it was filed with the multi-joint pulls on the push/pull rule, when it belongs with the single-joint machines, which have no lockout available to them at all.",
       "unilateral": true,
-      "needsConfirmation": true,
-      "openQuestion": "Derived from the push/pull rule, never confirmed against the machine. Confirm the top hold stays loaded — if the arms reach a position where the frame or the skeleton takes the load, it is REST."
+      "needsConfirmation": false
     },
     {
       "code": "C7",
