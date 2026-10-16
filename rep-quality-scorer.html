@@ -212,7 +212,7 @@
 
   <header>
     <div>
-      <div class="brand">Prototype · velocity engine · build 16 Oct 21:54 UTC</div>
+      <div class="brand">Prototype · velocity engine · build 16 Oct 22:08 UTC</div>
       <h1>Rep Quality Scorer</h1>
     </div>
     <div class="status-row">
@@ -1212,50 +1212,143 @@ function coachingFor(slots) {
              withinPct: best.worse * 100, stepPct: step * 100 };
   }
 
+  // A stroke that did not cover the range cannot be timed against a full-range target. Two
+  // of them turned up on the first loaded set, and the coach's account of that set says they
+  // were different events with the same shape on the trace:
+  //
+  //   - the OPENER, 151mm against a 245mm set median, was an entry aid being used to bring
+  //     the handles within reach before the first real rep. It was not lifting at all, and
+  //     counting its 2.4s as a rushed concentric cost the phase 10 points it had not lost.
+  //   - the CLOSER, 133mm, is the other end of the set: a concentric taken to momentary
+  //     muscular failure, after which the stack does not travel its full distance back. On
+  //     this recording it is also where the capture stops, and from the signal alone those
+  //     two cannot be told apart.
+  //
+  // Both are excluded from the stroke averages and both are named. But only at the BOOKENDS:
+  // a short stroke in the FIRST or LAST rep is the set starting or finishing, and a short
+  // stroke anywhere in between is a rep the client cut short, which is a fault and has to be
+  // scored as one. Excluding those too was tried and was plainly wrong — it took the worst
+  // strokes out of the worst sets and paid them for it: a torso set whose range was scattered
+  // rep to rep went from 21 to 32 by having its six shortest strokes removed, and a set with a
+  // genuine mid-set range change went from 32 to 31 on the same mechanism. The scatter IS the
+  // finding there. Mid-set partials are still named on screen and in the export; they are just
+  // not forgiven.
+  //
+  // The bar is a fraction of the set's OWN median stroke, not a fixed distance, because
+  // travel varies with the machine, the gearing and the seat. At 0.65 the two real partials
+  // (0.62 and 0.54 of median) fall outside and the shortest genuinely full stroke in the same
+  // set (0.73) stays in. Range lost to fatigue is gradual and sits well above it, so a client
+  // whose reps shorten as they tire is not quietly dropped from their own set.
+  //
+  // Deliberately NOT applied to the integrity checks — stroke travel spread, and the search
+  // for a coached range change. Those exist to ask whether the reconstruction can be trusted
+  // at all, and an outlier detector that first removes the outliers answers nothing.
+  const PARTIAL_FRAC = 0.65;        // of the set's median stroke, below which a stroke is partial
+  const PARTIAL_MIN_STROKES = 6;    // fewer than this and the median is not worth comparing to
+  function partialsOf(res) {
+    const reps = res.reps || [];
+    const all = [];
+    reps.forEach((r, i) => {
+      if (r.concTravel > 0) all.push({ i: i, key: 'conc', tv: r.concTravel });
+      if (r.eccTravel > 0) all.push({ i: i, key: 'ecc', tv: r.eccTravel });
+    });
+    if (all.length < PARTIAL_MIN_STROKES) return null;
+    const srt = all.map(x => x.tv).sort((a, b) => a - b);
+    const med = srt[srt.length >> 1];
+    if (!(med > 0)) return null;
+    const last = reps.length - 1;
+    const flagged = all.filter(x => x.tv < med * PARTIAL_FRAC);
+    if (!flagged.length) return null;
+    const excluded = flagged.filter(x => x.i === 0 || x.i === last);
+    const has = (i, k) => excluded.some(f => f.i === i && f.key === k);
+    // Named by the rep it sits in rather than by position in the recording: a rep's two
+    // strokes are paired by direction, not by which came first, so the app cannot promise
+    // which of them the client performed first and should not pretend to.
+    return {
+      medianMm: med * 1000,
+      conc: reps.map((r, i) => has(i, 'conc')),
+      ecc: reps.map((r, i) => has(i, 'ecc')),
+      list: flagged.map(f => ({
+        rep: f.i + 1, phase: f.key === 'conc' ? 'concentric' : 'eccentric',
+        travelMm: f.tv * 1000, pctOfMedian: (f.tv / med) * 100,
+        where: f.i === 0 ? 'opening' : (f.i === last ? 'closing' : 'middle'),
+        excluded: f.i === 0 || f.i === last
+      }))
+    };
+  }
+
+
   // Training to momentary muscular failure shows up as the concentric getting slower rep by
   // rep against the same load: the client is pushing as hard at the end as at the start and
   // the stack moves less for it. That is the sign of a set worth doing, and the scorer must
   // not read it as a fault. It already does not — the concentric has no slow side, so a rep
   // that runs long costs nothing there. What it DID cost is the eccentric: a client who can
   // barely finish the lift lowers under control and takes longer doing it, and the slow
-  // eccentric penalty docked a real near-failure set 12 points for exactly that. So a set
-  // carrying this signature has its eccentric slow side waived.
+  // eccentric penalty scored a real near-failure set's 4.9s lowering at 72 instead of 100 —
+  // seven points off the set — for exactly that. So a set carrying this signature has its
+  // eccentric slow side waived.
   //
   // Reported, never rewarded. A bonus would be gameable — lift slowly on purpose and collect
   // marks — and it would conflate two different questions: the score says whether the set was
   // lifted as prescribed, this says how hard it was worked. The coach wants both, separately.
   //
-  // The waiver itself is close to self-limiting, which is the reason it can be given away on a
-  // measurement rather than on a trainer's word. Faking the ramp means making the EARLY reps
-  // fast, and the concentric's fast side charges for those: on the real near-failure set the
-  // first reps at 2.7s against a 4s target already cost the concentric 10 points, more than
-  // the 12 the waiver handed back across a quarter-weighted phase. A client cannot ramp into
-  // the exemption without paying for it on the way in.
+  // The waiver is partly self-limiting, which is part of why it can be given away on a
+  // measurement rather than on a trainer's word: faking the ramp means making the EARLY reps
+  // fast, and that pulls the concentric MEAN down into its own fast-side penalty. It is not a
+  // complete defence, and the real set shows the limit. Its mean concentric came out at 3.60s
+  // against a 4s target — exactly on the 10% allowance, so the ramp cost it nothing — and only
+  // a steeper fake would start to charge. Worth revisiting if the waiver is ever worth more
+  // than the quarter-weighted eccentric it currently covers.
   //
   // Two conditions, because either alone is something else. The RISE says the end of the set
   // is meaningfully slower than the start, measured first-two against last-two so that one
-  // slow rep cannot carry it. The RANK CORRELATION says it got there in order, rep after rep,
-  // rather than in one jump: a set that is steady until the client stumbles on the last rep is
-  // not a fatigue ramp, and nor is one that starts slow and speeds up. The thresholds were set
-  // on a synthetic ramp and are held at the first real set reported as taken to failure — that
-  // one ran +72% with a rank correlation of 0.72, clearing both by a margin small enough that
-  // loosening them further would start admitting noise.
-  const FATIGUE_RISE_MIN = 0.15;   // how much longer the last reps must take than the first
-  const FATIGUE_RHO_MIN = 0.70;    // and how closely that rise has to follow rep order
+  // slow rep cannot carry it. The RANK CORRELATION says it got there in rep order: a set that
+  // is steady until the client stumbles on the last rep is not a fatigue ramp, and nor is one
+  // that starts slow and speeds up.
+  //
+  // The rank bar is NOT a fixed number, and the first labelled set is why. A fixed 0.70 was
+  // tuned on a synthetic ramp, and the one set the coach has confirmed as taken to or near
+  // failure reads 0.617 across nine reps once its entry stroke is properly excluded — BELOW
+  // three sets carrying no label at all (0.643 over 8, 0.690 over 8, 0.714 over 6). No fixed
+  // bar separates them, because rank correlation is not comparable across set lengths: 0.714
+  // over six reps is weaker evidence than 0.600 over nine. So each set is held against the 5%
+  // significance point for ITS OWN rep count — the level below which the ordering cannot be
+  // told from chance. Long sets are allowed a messier climb and short ones are not, the
+  // confirmed set clears its bar, and the short set that read highest does not clear its own.
+  //
+  // The rise bar is 30%, up from the 15% the synthetic was tuned at, and that one IS a
+  // calibration against unlabelled data: the highest rise among sets not reported as taken to
+  // failure is +24%, and 30% puts clear air above it. The defence that does not lean on the
+  // fixtures is that a third longer is a slowdown a coach sees from the side of the machine —
+  // a 4s concentric becoming 5.2s — and is not easy to produce by accident. Re-set it as soon
+  // as more sets carry a label.
+  //
+  // One-tailed 5% critical values for Spearman's rho, tabulated where the table matters and
+  // approximated above it by 1.645/sqrt(n-1), which reproduces the n=20 entry to 0.003.
+  const FATIGUE_RISE_MIN = 0.30;   // how much longer the last reps must take than the first
   const FATIGUE_MIN_REPS = 6;      // below this a trend cannot be told from two long reps
+  const RHO_CRIT = { 6: 0.829, 7: 0.714, 8: 0.643, 9: 0.600, 10: 0.564, 11: 0.536, 12: 0.503,
+                     13: 0.484, 14: 0.464, 15: 0.446, 16: 0.429, 17: 0.414, 18: 0.401,
+                     19: 0.391, 20: 0.380 };
+  const rhoCritical = N => RHO_CRIT[N] != null ? RHO_CRIT[N] : 1.645 / Math.sqrt(N - 1);
   function fatigueOf(res) {
     // Only on the velocity engine, and only on a set that read as reps at all. The fallback
     // engine's durations are not accurate enough for a 15% trend to mean anything, and on an
     // unreadable set the concentric is not reliably the concentric.
     if (!res.seg || res.seg.method !== 'velocity' || res.unreadable) return null;
-    const d = (res.reps || []).map(r => r.concentric)
+    // Full-length concentrics only. A ramp that leans on a half stroke is not a ramp: the
+    // opener on the first loaded set was 151mm in 2.4s, and leaving it in made the rise look
+    // steeper than the lifting was. Removing it the same set still reads +53% at 0.78, which
+    // is the finding standing on reps that are all the same job.
+    const part = partialsOf(res);
+    const d = (res.reps || []).filter((r, i) => !(part && part.conc[i]))
+                              .map(r => r.concentric)
                               .filter(v => v !== null && v !== undefined && v > 0);
     if (d.length < FATIGUE_MIN_REPS) return null;
     const N = d.length;
     const first = (d[0] + d[1]) / 2, last = (d[N - 1] + d[N - 2]) / 2;
     if (!(first > 0)) return null;
     const rise = (last - first) / first;
-    if (rise < FATIGUE_RISE_MIN) return null;
     // Spearman: Pearson on the ranks, ties averaged, against rep order. Ranks rather than raw
     // durations because the shape of the ramp is not the claim — only that it goes one way.
     const ord = d.map((v, i) => i).sort((a, b) => d[a] - d[b]);
@@ -1276,8 +1369,14 @@ function coachingFor(slots) {
     }
     if (!(dr > 0 && di > 0)) return null;
     const rho = num / Math.sqrt(dr * di);
-    if (rho < FATIGUE_RHO_MIN) return null;
-    return { reps: N, risePct: rise * 100, rho: rho, firstSeconds: first, lastSeconds: last };
+    // Measured either way; `fires` says whether it cleared. The numbers are published on every
+    // readable set even when they do not, because the bars above rest on a single labelled
+    // example and the only way that improves is if the sets falling short are visible too.
+    // Nothing but `fires` touches the score.
+    const need = rhoCritical(N);
+    return { reps: N, risePct: rise * 100, rho: rho, rhoNeeded: need,
+             firstSeconds: first, lastSeconds: last,
+             fires: rise >= FATIGUE_RISE_MIN && rho >= need };
   }
   // How far the stack must actually move for a phase time to mean anything. The spread check
   // above asks whether the reps agree with each other, which a client doing consistently tiny
@@ -1701,7 +1800,8 @@ function coachingFor(slots) {
     // export, the pasted text — sees the same eccentric. A set shown as exempt on screen and
     // filed as penalised would be worse than either answer on its own.
     const fat = fatigueOf(res);
-    const eccSlow = fat ? null : t.sEcc;
+    const eccSlow = (fat && fat.fires) ? null : t.sEcc;
+    const part = partialsOf(res);
     const defs = [
       { label: 'Concentric', sub: 'stack rising',  key: 'concentric',  target: t.conc, pause: false, travelKey: 'concTravel', weight: t.wConc, grace: t.gConc, slow: t.sConc },
       { label: 'Top pause',  sub: 'stack at top',  key: 'topPause',    target: t.top,  pause: true, flag: 'topNoHold', weight: t.wTop, grace: t.gTop,
@@ -1711,36 +1811,57 @@ function coachingFor(slots) {
       { label: 'Eccentric',  sub: 'stack lowering',key: 'eccentric',   target: t.ecc,  pause: false, travelKey: 'eccTravel', weight: t.wEcc, grace: t.gEcc, slow: eccSlow,
         // Set only where the waiver actually changed something: with no slow side configured
         // there was nothing to waive, and saying so would claim a leniency that is not there.
-        slowWaived: !!(fat && t.sEcc != null) },
+        slowWaived: !!(fat && fat.fires && t.sEcc != null) },
       { label: 'Btm pause',  sub: 'stack at base', key: 'bottomPause', target: t.btm,  pause: true, flag: 'bottomNoHold', weight: t.wBtm, grace: t.gBtm,
         longGrace: t.holdBtm === 'LOADED' ? null : t.gBtm, hold: t.holdBtm }
     ];
     const avg = v => v.reduce((a, b) => a + b, 0) / v.length;
     return defs.map(d => {
       // Present = the turnaround happened at all. Absent (null) is the last rep's missing
-      // bottom pause, which is a gap in the recording, not a skipped hold.
-      const present = res.reps.filter(r => r[d.key] !== null && r[d.key] !== undefined);
-      if (!present.length) return Object.assign({}, d, { n: 0, skipped: 0, rated: false });
-      const shown = present.filter(r => !(d.flag && r[d.flag])).map(r => r[d.key]);
-      const judged = present.map(r => (d.flag && r[d.flag]) ? Math.max(r[d.key], MIN_HOLD_S) : r[d.key]);
+      // bottom pause, which is a gap in the recording, not a skipped hold. Carried with its
+      // rep index, because whether a stroke covered the range is a fact about that rep.
+      let present = res.reps.map((r, i) => ({ r: r, i: i }))
+        .filter(x => x.r[d.key] !== null && x.r[d.key] !== undefined);
+      if (!present.length) return Object.assign({}, d, { n: 0, skipped: 0, dropped: 0, rated: false });
+      // Strokes that did not cover the range come out of the average. Pauses do not: a client
+      // either stopped at the turnaround or did not, and how far the stroke before it went
+      // does not change that. Held back if it would leave too little to average — a phase
+      // scored off one or two strokes is a worse answer than one carrying a partial.
+      const mask = d.pause ? null
+        : (part && (d.key === 'concentric' ? part.conc : d.key === 'eccentric' ? part.ecc : null));
+      let dropped = 0;
+      if (mask) {
+        const kept = present.filter(x => !mask[x.i]);
+        if (kept.length >= 3 && kept.length < present.length) {
+          dropped = present.length - kept.length; present = kept;
+        }
+      }
+      const shown = present.filter(x => !(d.flag && x.r[d.flag])).map(x => x.r[d.key]);
+      const judged = present.map(x => (d.flag && x.r[d.flag]) ? Math.max(x.r[d.key], MIN_HOLD_S) : x.r[d.key]);
       const mean = shown.length ? avg(shown) : null;
       const sd = shown.length
         ? Math.sqrt(shown.reduce((a, v) => a + (v - mean) * (v - mean), 0) / shown.length) : null;
       const jm = avg(judged);
       const score = d.pause ? scorePause(jm, d.target, t.tol, d.grace, d.longGrace)
                             : scorePhase(jm, d.target, t.tol, d.grace, d.slow);
+      // Travel is averaged over the same strokes that were timed, so the figure on screen
+      // describes the range the set was actually worked through.
       let travel = null;
       if (d.travelKey) {
-        const tv = res.reps.map(r => r[d.travelKey]).filter(v => v !== null && v !== undefined);
+        const tv = present.map(x => x.r[d.travelKey]).filter(v => v !== null && v !== undefined);
         if (tv.length) travel = tv.reduce((a, b) => a + b, 0) / tv.length;
       }
       return Object.assign({}, d, { n: shown.length, skipped: present.length - shown.length,
-                                    rated: true, mean, sd, score, travel });
+                                    dropped: dropped, rated: true, mean, sd, score, travel });
     });
   }
 
-  function cell(label, val, target, tol, noHold, isPause, grace, slow, longGrace) {
+  function cell(label, val, target, tol, noHold, isPause, grace, slow, longGrace, partial) {
     if (val === null || val === undefined) return '<div class="pt"><span class="ptk">' + label + '</span><span class="ptv">—</span></div>';
+    // The time still shown, because it was measured, but unscored and marked: this stroke did
+    // not cover the range, so there is no target it can honestly be held against.
+    if (partial) return '<div class="pt" style="opacity:.55"><span class="ptk">' + label
+      + '</span><span class="ptv" style="font-size:11px">' + val.toFixed(1) + 's<br>part</span></div>';
     // Shown in full, but marked: the stroke boundaries either side of a pause this short are
     // not separable, so the figure is an artefact of where the threshold happened to fall.
     if (noHold) return '<div class="pt" style="opacity:.55"><span class="ptk">' + label
@@ -1765,7 +1886,8 @@ function coachingFor(slots) {
     // The same waiver the phase row applies, so a rep's eccentric is not coloured red in the
     // card above a row that scored the phase 100.
     const fat = fatigueOf(res);
-    const eccSlowShown = fat ? null : tgt.sEcc;
+    const eccSlowShown = (fat && fat.fires) ? null : tgt.sEcc;
+    const part = partialsOf(res);
     repList.innerHTML = '';
     if (!res.reps.length) {
       repList.innerHTML = '<div class="empty-note">No reps detected this set.</div>';
@@ -1776,10 +1898,12 @@ function coachingFor(slots) {
         d.innerHTML =
           '<div class="rep-card-top"><div class="rep-num">REP ' + (i + 1) + '</div></div>' +
           '<div class="phase-times">' +
-            cell('CONC', r.concentric, tgt.conc, tgt.tol, false, false, tgt.gConc, tgt.sConc) +
+            cell('CONC', r.concentric, tgt.conc, tgt.tol, false, false, tgt.gConc, tgt.sConc, null,
+                 !!(part && part.conc[i])) +
             cell('TOP', r.topPause, tgt.top, tgt.minPause, r.topNoHold, true, tgt.gTop, null,
                  tgt.holdTop === 'LOADED' ? null : tgt.gTop) +
-            cell('ECC', r.eccentric, tgt.ecc, tgt.tol, false, false, tgt.gEcc, eccSlowShown) +
+            cell('ECC', r.eccentric, tgt.ecc, tgt.tol, false, false, tgt.gEcc, eccSlowShown, null,
+                 !!(part && part.ecc[i])) +
             cell('BTM', r.bottomPause, tgt.btm, tgt.minPause, r.bottomNoHold, true, tgt.gBtm, null,
                  tgt.holdBtm === 'LOADED' ? null : tgt.gBtm) +
           '</div>';
@@ -1806,6 +1930,8 @@ function coachingFor(slots) {
         + (s.slowWaived ? ' · slow side waived, set reads as near failure' : '')
         + (weightOf(s) !== 1 ? ' · weight ×' + weightOf(s) : '')
         + (s.skipped ? ' · ' + s.skipped + ' with no pause at all' : '')
+        + (s.dropped ? ' · ' + s.dropped + (s.dropped === 1 ? ' partial stroke' : ' partial strokes')
+                       + ' left out' : '')
         + (s.travel ? ' · travel ~' + (s.travel * 1000).toFixed(0) + 'mm' : '') + '</span></span>'
         + '<span class="pa-time">' + timeTxt + '</span>'
         + '<span class="pa-score ' + scoreClass(s.score) + '">' + s.score.toFixed(0) + '</span></div>';
@@ -1814,7 +1940,7 @@ function coachingFor(slots) {
     // Said plainly and separately from the score, because it is the one thing on this screen
     // that is about effort rather than compliance. The numbers are the measured means, not the
     // thresholds: a coach reading "2.9s to 5.0s" can check it against what they watched.
-    if (fat) {
+    if (fat && fat.fires) {
       effortNote.style.display = 'block';
       effortNote.textContent = 'The concentric slowed through the set: about '
         + fat.firstSeconds.toFixed(1) + 's on the first two reps and ' + fat.lastSeconds.toFixed(1)
@@ -1993,6 +2119,51 @@ function coachingFor(slots) {
       note = 'Signal marginal: peak ' + seg.peak.toFixed(4) + ' m/s² is only ' + ratio.toFixed(1)
         + '× the ' + seg.thr.toFixed(4) + ' threshold. Phase times may read short. Mount more '
         + 'rigidly, use a longer stroke, or lift to a quicker tempo.';
+    }
+    // Worded by position, because the same short stroke means different things at each end of
+    // a set and the coach needs the difference. At the start it is almost always getting into
+    // position — an entry aid, a grip being taken, a seat being settled. At the end it is the
+    // set finishing: either a concentric that failed, or the recording stopping mid-stroke,
+    // and the signal cannot say which. In the middle it is a rep that was cut short.
+    if (part) {
+      const one = part.list.length === 1;
+      const nDrop = part.list.filter(x => x.excluded).length;
+      const has = w => part.list.some(x => x.where === w);
+      // Named individually up to four, then counted. Six of them on a scattered torso set
+      // filled the whole note and buried the reading above it, which was the more important
+      // thing on the screen.
+      const named = part.list.slice(0, 4).map(x => 'rep ' + x.rep + "'s " + x.phase + ' at '
+        + x.travelMm.toFixed(0) + 'mm (' + x.pctOfMedian.toFixed(0) + '%)');
+      const rest = part.list.length - named.length;
+      let line = (one ? 'One stroke did not cover the range: ' : part.list.length
+             + ' strokes did not cover the range: ')
+        + named.join(', ') + (rest ? ' and ' + rest + ' more' : '')
+        + ', against a set median of ' + part.medianMm.toFixed(0) + 'mm. ';
+      // What happened to them, which depends on where they sit and not on how short they were.
+      line += nDrop === part.list.length
+          ? (one ? 'It is at an end of the set and is' : 'They are at the ends of the set and are')
+            + ' left out of the phase averages: a stroke that travelled half as far cannot be '
+            + 'timed against a full-range target.'
+        : nDrop === 0
+          ? 'All are mid-set, so all are scored — a rep cut short in the middle of a set is a '
+            + 'fault, not the set starting or finishing.'
+          : nDrop + ' at the ends of the set are left out of the phase averages; the rest are '
+            + 'mid-set and are scored, because a rep cut short mid-set is a fault rather than '
+            + 'the set starting or finishing.';
+      line += ' Every rep is still counted and every time still shown, marked.';
+      // Worded by position, because the same short stroke means different things at each end
+      // of a set and the coach needs the difference.
+      if (has('opening'))
+        line += ' A short stroke at the start is usually getting into position rather than '
+             + 'lifting — an entry aid, a grip being taken, the seat being settled.';
+      if (has('closing'))
+        line += ' A short stroke at the end is the set finishing: a concentric that failed, '
+             + 'which is where a set taken to failure should end, or the recording stopping '
+             + 'before the stack came back. The trace cannot tell those apart.';
+      if (has('middle'))
+        line += ' A short stroke mid-set is worth asking about: the reps around it covered the '
+             + 'full range.';
+      note = note ? note + ' — ' + line : line;
     }
     if (shift) {
       const line = 'Range of motion changed partway through: about ' + shift.beforeMm.toFixed(0)
@@ -2531,6 +2702,7 @@ function coachingFor(slots) {
     const s = res.seg, t = res.targets;
     const slots = phaseSlots(res);
     const fat = fatigueOf(res);
+    const part = partialsOf(res);
     const by = n => slots.find(x => x.label === n) || {};
     const ratio = s.thr > 0 ? s.peak / s.thr : 0;
     const cS = by('Concentric'), eS = by('Eccentric');
@@ -2569,7 +2741,10 @@ function coachingFor(slots) {
       spreadSeconds: x.sd !== null ? +x.sd.toFixed(2) : null,
       targetSeconds: x.target, score: Math.round(x.score),
       travelMm: x.travel ? Math.round(x.travel * 1000) : null,
-      samples: x.n, skippedSamples: x.skipped } : null; };
+      samples: x.n, skippedSamples: x.skipped,
+      // Strokes left out of this average for not covering the range. meanSeconds and travelMm
+      // describe the strokes that remain, so the two always agree with each other.
+      partialStrokesExcluded: x.dropped || 0 } : null; };
 
     return {
       schema: 'rep-scorer/1',
@@ -2595,19 +2770,33 @@ function coachingFor(slots) {
         weakestPhaseScore: rated.length ? Math.round(Math.min.apply(null, rated.map(x => x.score))) : null,
         phases: { concentric: phase('Concentric'), topPause: phase('Top pause'),
                   eccentric: phase('Eccentric'), bottomPause: phase('Btm pause') },
+        // Strokes that did not cover the set's own range, excluded from the phase averages
+        // above and listed here so the exclusion can be audited rather than taken on trust.
+        // where is opening, closing or middle: the position is what decides what it means.
+        partialStrokes: part ? {
+          medianStrokeMm: Math.round(part.medianMm),
+          thresholdPctOfMedian: Math.round(PARTIAL_FRAC * 100),
+          strokes: part.list.map(x => ({ rep: x.rep, phase: x.phase,
+            travelMm: Math.round(x.travelMm), pctOfMedian: Math.round(x.pctOfMedian),
+            where: x.where, excludedFromAverages: x.excluded }))
+        } : null,
         // Effort, kept out of the score on purpose. null means the set did not carry the
         // signature, which is not the same as the client not having worked — a set can be
         // taken to failure in six hard reps that are all the same speed. It only ever says
         // what was measured. slowEccentricPenaltyWaived is the one place it touched the
         // score, and it travels with it so the number can be reproduced.
         effort: fat ? {
-          readsAsNearFailure: true,
+          readsAsNearFailure: fat.fires,
           concentricRampPct: Math.round(fat.risePct),
-          rankCorrelation: +fat.rho.toFixed(2),
+          rampPctNeeded: Math.round(FATIGUE_RISE_MIN * 100),
+          rankCorrelation: +fat.rho.toFixed(3),
+          // The 5% significance point for THIS set's rep count, not a fixed bar: rank
+          // correlation is not comparable between a six-rep set and a twelve-rep one.
+          rankCorrelationNeeded: +fat.rhoNeeded.toFixed(3),
           firstRepsSeconds: +fat.firstSeconds.toFixed(2),
           lastRepsSeconds: +fat.lastSeconds.toFixed(2),
           repsConsidered: fat.reps,
-          slowEccentricPenaltyWaived: t.sEcc != null
+          slowEccentricPenaltyWaived: fat.fires && t.sEcc != null
         } : null
       },
       quality: {
