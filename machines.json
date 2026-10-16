@@ -20,6 +20,7 @@
       "stackTravelMm": null,
       "targetTempo": null,
       "notes": "Knee cannot lock out and shed load to the skeleton, so the quad holds the leg against the pad through full extension. Bottom is a coached hover, so the quad keeps holding the load in the stretched position.",
+      "unilateral": true,
       "needsConfirmation": false
     },
     {
@@ -40,6 +41,7 @@
       "stackTravelMm": null,
       "targetTempo": null,
       "notes": "Hamstring holds against resistance at full flexion. Bottom confirmed LOADED by the coach: this machine keeps tension at both ends, so the submitted REST was wrong and the coached-hover policy was right. No longer an open question.",
+      "unilateral": true,
       "needsConfirmation": false
     },
     {
@@ -60,6 +62,7 @@
       "stackTravelMm": null,
       "targetTempo": null,
       "notes": "First machine where the two ends differ. At the top the knees lock and the load passes through the skeleton, so holding there is rest however it is coached — the hover policy does not override it. At the bottom the knees are flexed and the quads hold the carriage, so the hover is work. Often geared 2:1 to keep the stack manageable, which would halve the travel the phone sees — worth taping.",
+      "unilateral": true,
       "needsConfirmation": false
     },
     {
@@ -103,6 +106,18 @@
       "needsConfirmation": false
     },
     {
+      "code": "C1",
+      "name": "Pullover",
+      "topHold": "LOADED",
+      "bottomHold": "LOADED",
+      "stackTravelMm": null,
+      "targetTempo": null,
+      "notes": "Classified by the file's own push/pull rule rather than from a recording: a pullover is a PULL, so there is no lockout and the lat holds the load at the shortest position, exactly as on C7 Row and C3 Pulldown. Bottom is a coached hover and stays loaded. Flagged for confirmation because the rule was applied to a machine nobody has described here, not because the rule is in doubt.",
+      "unilateral": true,
+      "needsConfirmation": true,
+      "openQuestion": "Derived from the push/pull rule, never confirmed against the machine. Confirm the top hold stays loaded — if the arms reach a position where the frame or the skeleton takes the load, it is REST."
+    },
+    {
       "code": "C7",
       "name": "Row",
       "topHold": "LOADED",
@@ -135,5 +150,6 @@
     "eccentricSeconds": 4,
     "bottomPauseSeconds": 2,
     "note": "Prescribed across the estate. Held here once rather than copied onto every machine, so changing the prescription is one edit. A machine's own targetTempo stays null unless it needs to differ — null means inherit this. Order is concentric first, which is how the app's inputs read; standard coaching notation starts with the eccentric, so 4-2-4-2 is only identical because it is symmetric."
-  }
+  },
+  "unilateral": "Machines that can be worked one side at a time. A side is recorded with the set so left and right stay separate: they are different work and averaging them hides the asymmetry that is worth seeing. The hold rules do not change with side."
 }

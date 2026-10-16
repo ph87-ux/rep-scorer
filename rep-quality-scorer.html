@@ -209,7 +209,7 @@
 
   <header>
     <div>
-      <div class="brand">Prototype · velocity engine · build 16 Oct 20:54 UTC</div>
+      <div class="brand">Prototype · velocity engine · build 16 Oct 20:56 UTC</div>
       <h1>Rep Quality Scorer</h1>
     </div>
     <div class="status-row">
@@ -228,6 +228,15 @@
       style="width:100%;background:var(--card);border:1px solid var(--hair);color:var(--ink);
       border-radius:10px;padding:13px 14px;font-family:var(--sans);font-size:16px;font-weight:600;">
       <option value="">Not set — holds judged both ways</option>
+    </select>
+    <!-- Hidden until the chosen machine can be worked one side at a time, so the control
+         never invites a side on a machine that has none. -->
+    <select id="sideIn" style="display:none;width:100%;margin-top:8px;background:var(--card);
+      border:1px solid var(--hair);color:var(--ink);border-radius:10px;padding:13px 14px;
+      font-family:var(--sans);font-size:16px;font-weight:600;">
+      <option value="">Both sides together</option>
+      <option value="L">Left side only</option>
+      <option value="R">Right side only</option>
     </select>
     <div style="font-size:12px;color:var(--dim);margin-top:8px;line-height:1.45;font-weight:500;">
       Kept with each set so a session across several machines stays sorted. The analysis needs
@@ -1223,15 +1232,16 @@ function coachingFor(slots) {
   // Regenerate from machines.json whenever a hold classification there changes; only the four
   // fields the app actually reads are copied.
   const MACHINES_BUILTIN = [
-    {code:'B1', name:"Leg Extension", topHold:'LOADED', bottomHold:'LOADED'},
+    {code:'B1', name:"Leg Extension", topHold:'LOADED', bottomHold:'LOADED', unilateral:true},
     {code:'B5', name:"Leg Curl", topHold:'LOADED', bottomHold:'LOADED'},
-    {code:'B7', name:"Leg Curl (seated)", topHold:'LOADED', bottomHold:'LOADED'},
+    {code:'B7', name:"Leg Curl (seated)", topHold:'LOADED', bottomHold:'LOADED', unilateral:true},
     {code:'B8', name:"Tibialis Dorsi Flexion", topHold:'LOADED', bottomHold:'LOADED'},
-    {code:'B6', name:"Leg Press", topHold:'REST', bottomHold:'LOADED'},
+    {code:'B6', name:"Leg Press", topHold:'REST', bottomHold:'LOADED', unilateral:true},
     {code:'D6', name:"Chest Press", topHold:'REST', bottomHold:'LOADED'},
     {code:'D7', name:"Seated Dip", topHold:'REST', bottomHold:'LOADED'},
     {code:'E3', name:"Overhead Press (front grip)", topHold:'REST', bottomHold:'LOADED'},
     {code:'E1', name:"Overhead Press (rear grip)", topHold:'REST', bottomHold:'LOADED'},
+    {code:'C1', name:"Pullover", topHold:'LOADED', bottomHold:'LOADED', unilateral:true},
     {code:'C7', name:"Row", topHold:'LOADED', bottomHold:'LOADED'},
     {code:'C3', name:"Pulldown", topHold:'LOADED', bottomHold:'LOADED'}
   ];
@@ -1249,7 +1259,18 @@ function coachingFor(slots) {
       sel.appendChild(o);
     }
     sel.value = keep;                          // a machine chosen before the file landed stays chosen
+    syncSide();
   }
+  // A side is only meaningful on a machine that can be worked one side at a time, and it is
+  // cleared when moving to one that cannot — otherwise a side set on the leg press would
+  // follow silently onto the row and label a set that was never unilateral.
+  function syncSide() {
+    const m = machineByCode($('machineIn').value), side = $('sideIn');
+    const on = !!(m && m.unilateral);
+    side.style.display = on ? 'block' : 'none';
+    if (!on) side.value = '';
+  }
+  $('machineIn').addEventListener('change', syncSide);
   (function loadMachines() {
     fillMachines();                            // never leave the list empty
     if (typeof fetch !== 'function') return;
@@ -1423,6 +1444,7 @@ function coachingFor(slots) {
       sConc: grOpt('gs1'), sEcc: grOpt('gs2'),
       // null where no machine is chosen, which leaves both ends judged on both sides.
       machineCode: $('machineIn').value || null,
+      side: $('sideIn').value || null,
       holdTop: mach ? mach.topHold : null,
       holdBtm: mach ? mach.bottomHold : null
     };
@@ -1891,8 +1913,10 @@ function coachingFor(slots) {
     if (!keep) return;
     const rec = resultRecord(res);
     // The readable label, not the bare code: the session list is what a coach reads back.
-    const mSel = $('machineIn');
-    rec.machine = mSel.value ? (mSel.options[mSel.selectedIndex] || {}).textContent || mSel.value : null;
+    const mSel = $('machineIn'), sdSel = $('sideIn');
+    const sideTxt = sdSel.value === 'L' ? ' (left)' : sdSel.value === 'R' ? ' (right)' : '';
+    rec.machine = mSel.value
+      ? ((mSel.options[mSel.selectedIndex] || {}).textContent || mSel.value) + sideTxt : null;
     // Keep the recording itself with the set. Raw samples used to live in one variable that
     // the next set cleared, so the only set whose signal could be exported was the most
     // recent one, and only until another was started. A trial of several sets therefore
@@ -2454,7 +2478,9 @@ function coachingFor(slots) {
       slowAllowancePct: { concentric: t.sConc == null ? null : Math.round(t.sConc * 100),
                           eccentric: t.sEcc == null ? null : Math.round(t.sEcc * 100) },
       // Which rulebook entry was applied, so a score can be reproduced. null means none was.
-      holdRule: { machine: t.machineCode, top: t.holdTop, bottom: t.holdBtm },
+      // side is null on a bilateral set and on a machine that cannot be worked one side at a
+      // time. Left and right are different work and are kept apart rather than averaged.
+      holdRule: { machine: t.machineCode, side: t.side, top: t.holdTop, bottom: t.holdBtm },
       measured: {
         reps: res.reps.length,
         timeUnderTensionSeconds: res.tut !== null ? +res.tut.toFixed(1) : null,
