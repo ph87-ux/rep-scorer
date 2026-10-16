@@ -212,7 +212,7 @@
 
   <header>
     <div>
-      <div class="brand">Prototype · velocity engine · build 16 Oct 22:08 UTC</div>
+      <div class="brand">Prototype · velocity engine · build 16 Oct 22:16 UTC</div>
       <h1>Rep Quality Scorer</h1>
     </div>
     <div class="status-row">
@@ -1120,6 +1120,14 @@ const weightOf = s => (s.weight === undefined ? 1 : s.weight);
 // The set score is a weighted mean of the phase scores. A phase weighted 0 drops out, and a
 // phase with nothing to score (the turnaround never happened) drops out by itself. Under the
 // default equal weights this is exactly the plain mean it replaced, to the digit.
+// Calibration, such as it is. On 16 October the coach marked the first loaded set 6-7 out of
+// 10 without having seen the score; the app gave it 54. So the app reads harsher than the
+// coach by roughly a point and a half out of ten, and the gap is entirely the holds — 9 and 6
+// against strokes scoring 100 and 100. Asked directly whether holds should be forgiven on a
+// set taken near failure, the coach said no: a missed hold is a missed hold. The gap is
+// therefore known, explained, and deliberately left open rather than tuned away. One set is
+// not a calibration. It is the first point on one, and the first time any number in here has
+// been checked against a trainer's judgement at all.
 function weightedSetScore(slots) {
   let num = 0, den = 0;
   slots.filter(s => s.rated).forEach(s => { num += s.score * weightOf(s); den += weightOf(s); });
@@ -1219,10 +1227,13 @@ function coachingFor(slots) {
   //   - the OPENER, 151mm against a 245mm set median, was an entry aid being used to bring
   //     the handles within reach before the first real rep. It was not lifting at all, and
   //     counting its 2.4s as a rushed concentric cost the phase 10 points it had not lost.
-  //   - the CLOSER, 133mm, is the other end of the set: a concentric taken to momentary
-  //     muscular failure, after which the stack does not travel its full distance back. On
-  //     this recording it is also where the capture stops, and from the signal alone those
-  //     two cannot be told apart.
+  //   - the CLOSER, 133mm, is the mirror of it: an exit aid, which catches the stack so it
+  //     can be let go of safely. Guessed wrong first time as a failed rep, and the correction
+  //     is worth keeping because it makes the rule's shape obvious. Aids live at the ends of a
+  //     set by construction — getting on, getting off — which is exactly where this rule
+  //     looks and nowhere else. The failure rep itself was the concentric BEFORE it, 202mm at
+  //     82% of median: not flagged, not excluded, scored like any other. The rule took the two
+  //     strokes that were not lifting and left the hardest rep of the set in the score.
   //
   // Both are excluded from the stroke averages and both are named. But only at the BOOKENDS:
   // a short stroke in the FIRST or LAST rep is the set starting or finishing, and a short
@@ -2157,9 +2168,10 @@ function coachingFor(slots) {
         line += ' A short stroke at the start is usually getting into position rather than '
              + 'lifting — an entry aid, a grip being taken, the seat being settled.';
       if (has('closing'))
-        line += ' A short stroke at the end is the set finishing: a concentric that failed, '
-             + 'which is where a set taken to failure should end, or the recording stopping '
-             + 'before the stack came back. The trace cannot tell those apart.';
+        line += ' A short stroke at the end is the set finishing: most often an exit aid '
+             + 'catching the stack so it can be let go of safely, and otherwise a rep that '
+             + 'failed part way or the recording stopping before the stack came back. The '
+             + 'trace cannot tell those apart, so the stroke is set aside rather than read.';
       if (has('middle'))
         line += ' A short stroke mid-set is worth asking about: the reps around it covered the '
              + 'full range.';
