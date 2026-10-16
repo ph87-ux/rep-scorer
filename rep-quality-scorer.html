@@ -212,7 +212,7 @@
 
   <header>
     <div>
-      <div class="brand">Prototype · velocity engine · build 16 Oct 22:16 UTC</div>
+      <div class="brand">Prototype · velocity engine · build 16 Oct 22:27 UTC</div>
       <h1>Rep Quality Scorer</h1>
     </div>
     <div class="status-row">
@@ -1254,6 +1254,48 @@ function coachingFor(slots) {
   // Deliberately NOT applied to the integrity checks — stroke travel spread, and the search
   // for a coached range change. Those exist to ask whether the reconstruction can be trusted
   // at all, and an outlier detector that first removes the outliers answers nothing.
+  // Signal falls as the SQUARE of the tempo: acceleration is distance over time squared, so
+  // doubling a prescribed phase time quarters what the phone has to read. The help text under
+  // this app has stated the consequence from the beginning — stroke in mm needs to be at least
+  // about 10 x (phase seconds)^2 on a firm mount, nearer 16x on a compliant one — and then
+  // nothing ever applied it, which cost a real set the right answer.
+  //
+  // An elbow flexion set recorded at 4-2-4-2 came back with 89% travel scatter and was told
+  // that the usual causes are the stack being dropped onto its own weight or the phone moving
+  // in its cradle. Neither is likely. That machine's stroke measured about 150mm, and at four
+  // seconds the rule wants 160mm on a firm mount and 256mm on a mount as compliant as its
+  // signal ratio implied. The set was not mis-mounted; it was prescribed a tempo its stroke
+  // cannot carry. Sending the coach to check a cradle that was fine is the worst kind of
+  // wrong answer, because it looks like help.
+  //
+  // Judged against the SLOWER of the two stroke targets, since that is the one that runs out
+  // of signal first, and against the median stroke, so one short rep cannot trigger it.
+  //
+  // Deliberately NOT added to failedChecks, and `trustworthy` is left alone. This is a rule of
+  // thumb carried in the help text, not a gate anything has validated, and `trustworthy` has a
+  // precise meaning that should not be diluted by a heuristic. It is loud on screen and it
+  // publishes its numbers; promote it to a hard check when a set proves it needs to be.
+  // 10 and not 16. The two real machines bracket it: the pulldown reads correctly at 244mm
+  // against a 4s stroke, where 16x would want 256mm and would condemn a set that measured its
+  // travel to within 3% of a tape measure; the curl fails at about 150mm, where 10x wants 160.
+  // A constant that flags the set which works is worse than useless.
+  const SIGNAL_MM_PER_S2 = 10;     // firm mount; a compliant one needs about 16
+  // The trigger fires AT the limit, but advice given at the limit is no advice — it hands back
+  // a tempo with no margin, which is how the set got here. The suggestion carries half as much
+  // again, so a coach who takes it lands inside the rule rather than back on its edge.
+  const SIGNAL_ADVICE_MARGIN = 1.5;
+  function tempoHeadroom(medTravelMm, t) {
+    if (medTravelMm == null || !t) return null;
+    const slowest = Math.max(t.conc, t.ecc);
+    if (!(slowest > 0)) return null;
+    const need = SIGNAL_MM_PER_S2 * slowest * slowest;
+    if (medTravelMm >= need) return null;
+    // The slowest stroke this travel CAN carry on the same rule, rounded down to a quarter
+    // second so the number reads as a tempo a coach would actually prescribe.
+    const ok = Math.floor(Math.sqrt(medTravelMm / (SIGNAL_MM_PER_S2 * SIGNAL_ADVICE_MARGIN)) * 4) / 4;
+    return { needMm: need, haveMm: medTravelMm, slowestTarget: slowest, workableSeconds: ok };
+  }
+
   const PARTIAL_FRAC = 0.65;        // of the set's median stroke, below which a stroke is partial
   const PARTIAL_MIN_STROKES = 6;    // fewer than this and the median is not worth comparing to
   function partialsOf(res) {
@@ -2078,6 +2120,10 @@ function coachingFor(slots) {
       const v = (seg.phases || []).map(p => p.travel).filter(x => x > 0).sort((a, b) => a - b);
       return v.length ? v[v.length >> 1] * 1000 : null;
     })();
+    // Only where the absolute floor has not already caught it: below 100mm the set is refused
+    // outright and a second explanation of the same fact would only crowd the first.
+    const headroom = (velMethod && medTravel != null && medTravel >= TRAVEL_MIN_MM)
+      ? tempoHeadroom(medTravel, tgt) : null;
     if (velMethod && medTravel != null && medTravel < TRAVEL_MIN_MM) {
       noteBad = true;
       note = 'The stack only moved about ' + medTravel.toFixed(0) + 'mm per rep, which is too '
@@ -2090,9 +2136,31 @@ function coachingFor(slots) {
       note = 'Could not read this set reliably: stroke travel varied by '
         + (spread * 100).toFixed(0) + '%, and no single point in the set divides it into two '
         + 'consistent halves, so it is not a range that changed — it is scattered rep to rep. '
-        + 'A stack moving through its fixed range should repeat to within about 15%. The usual '
-        + 'causes are the stack being dropped onto its own weight at the bottom, or the phone '
-        + 'moving in its cradle. Treat these phase times as unusable.';
+        + 'A stack moving through its fixed range should repeat to within about 15%. '
+        // The tempo cause goes first where it applies, because it is the specific one and the
+        // mechanical ones would send the coach to check a rig that is working.
+        + (headroom
+            ? 'The likely cause here is the tempo rather than the rig: this stroke measures about '
+              + headroom.haveMm.toFixed(0) + 'mm, and timing a ' + headroom.slowestTarget.toFixed(1)
+              + 's phase needs about ' + headroom.needMm.toFixed(0) + 'mm, because the signal '
+              + 'falls as the square of how long the stroke takes. Try this machine nearer '
+              + headroom.workableSeconds.toFixed(2).replace(/0$/, '') + 's a stroke before '
+              + 'suspecting the mount. '
+            : 'The usual causes are the stack being dropped onto its own weight at the bottom, '
+              + 'or the phone moving in its cradle. ')
+        + 'Treat these phase times as unusable.';
+    } else if (velMethod && headroom) {
+      // Internally consistent and still past the limit, which is the more dangerous case: it
+      // produces a set that looks fine and is not, with nothing else on the screen to say so.
+      noteBad = true;
+      note = 'This stroke is too short for the tempo you have prescribed. The stack moves about '
+        + headroom.haveMm.toFixed(0) + 'mm a rep, and timing a ' + headroom.slowestTarget.toFixed(1)
+        + 's phase needs about ' + headroom.needMm.toFixed(0) + 'mm on a firm mount — signal '
+        + 'falls as the square of the time a stroke takes, so a slower tempo through a short '
+        + 'range is the hardest thing here to measure. The reps and the time under tension '
+        + 'stand. The phase times may read short, and the set may not repeat. Either prescribe '
+        + 'this machine nearer ' + headroom.workableSeconds.toFixed(2).replace(/0$/, '')
+        + 's a stroke, or treat its phase times as indicative only.';
     } else if (!velMethod && seg.peak > 0 && ratio < SIGNAL_UNUSABLE) {
       noteBad = true;
       note = 'Signal too weak: peak ' + seg.peak.toFixed(4) + ' m/s² is only ' + ratio.toFixed(1)
@@ -2821,6 +2889,15 @@ function coachingFor(slots) {
         rangeShift: shift ? { atStroke: shift.atStroke,
           beforeMm: Math.round(shift.beforeMm), afterMm: Math.round(shift.afterMm),
           withinPartSpreadPct: Math.round(shift.withinPct) } : null,
+        // How much stroke the prescribed tempo needs against how much this machine gives.
+        // null means there is enough. Reported, never counted against the set — see the note
+        // on tempoHeadroom for why this is not a failed check.
+        tempoHeadroom: (function () {
+          const h = velMethod && mt != null && mt >= TRAVEL_MIN_MM ? tempoHeadroom(mt, t) : null;
+          return h ? { strokeMm: Math.round(h.haveMm), neededMm: Math.round(h.needMm),
+                       slowestTargetSeconds: h.slowestTarget,
+                       workableStrokeSeconds: h.workableSeconds } : null;
+        })(),
         signalRatio: +ratio.toFixed(1),
         alternationPct: Math.round((s.alternation || 0) * 100),
         travelMatchPct: travelMatch !== null ? Math.round(travelMatch * 100) : null,
