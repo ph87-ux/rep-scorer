@@ -212,7 +212,7 @@
 
   <header>
     <div>
-      <div class="brand">Prototype · velocity engine · build 17 Oct 08:33 UTC</div>
+      <div class="brand">Prototype · velocity engine · build 17 Oct 08:56 UTC</div>
       <h1>Rep Quality Scorer</h1>
     </div>
     <div class="status-row">
@@ -1459,7 +1459,12 @@ function coachingFor(slots) {
   // real rigid mount, a 4s stroke carries 0.06s of error at 300mm, 0.12s at 200mm, 0.23s at
   // 100mm, 0.38s at 70mm and 0.67s at 50mm. Against a 4s target the first three are inside
   // the scoring grace band and the last two are not.
-  const TRAVEL_MIN_MM = 100, TRAVEL_MARGINAL_MM = 150;
+  // TRAVEL_MARGINAL_MM, a 100-150mm band that warned without refusing, lived here unused:
+  // declared, never read, and described in the evidence summary as though it ran. The
+  // tempo-headroom check replaced it with a better question — not whether the stroke clears
+  // a fixed bar, but whether it clears what the PRESCRIBED tempo needs, which at 4-2-4-2 is
+  // about 160mm and at a quicker tempo far less. Removed rather than wired back up.
+  const TRAVEL_MIN_MM = 100;
   // machines.json sits next to this file and holds the per-machine hold rules. It is fetched
   // rather than inlined so there is one copy to edit, and every failure path leaves the app
   // exactly as it was without it: no machine selected means the configured allowances apply
