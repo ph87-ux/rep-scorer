@@ -27,9 +27,17 @@ The reconstruction has no systematic over-read, and what bias it has is conserva
 average over a set is good to about 3%; a single stroke is worth about ±15%, so no one rep's
 distance should be read as precise.
 
-This matters for one open question. The lat pulldown was taped at roughly 220mm and the app
-reads 236–262mm on it, which the evidence summary reported as the app reading high. On the
-figures above a 220mm carrier reads back at about 215mm, so the disagreement is not in the
-reconstruction. Either the tape figure is wrong, or it measured a part that does not travel
-with the phone — a cable ratio between the stack and the carrier would produce exactly this.
-Re-measure the machine before calibrating anything away.
+## Status against real equipment
+
+None. A pulldown was taped at roughly 220mm and the app reads 236–262mm on it, which the
+evidence summary reported as the app reading high. On the figures above a 220mm carrier reads
+back at about 215mm, so a reconstruction running 2.5% short cannot produce that. The tape
+figure has since been withdrawn as too rough to test against, and a careful measurement is
+being made.
+
+Until it exists: characterised against synthetic truth, unverified on a machine. Fit no
+correction to anything in the meantime.
+
+One thing to check when measuring: whether the part being taped is the part the phone travels
+on. A cable ratio between the stack and the carrier would produce a discrepancy of exactly
+this shape, and lat pulldowns commonly have one.

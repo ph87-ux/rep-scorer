@@ -212,7 +212,7 @@
 
   <header>
     <div>
-      <div class="brand">Prototype · velocity engine · build 17 Oct 09:27 UTC</div>
+      <div class="brand">Prototype · velocity engine · build 17 Oct 09:32 UTC</div>
       <h1>Rep Quality Scorer</h1>
     </div>
     <div class="status-row">
@@ -1476,12 +1476,17 @@ function coachingFor(slots) {
   // only the average over a set is worth 3%. Nothing on screen should be read as if one rep's
   // distance were precise.
   //
-  // This matters because the evidence summary reported the app as reading 7-19% HIGH on the
-  // one tape-measured machine, a pulldown whose carrier was taped at roughly 220mm and which
-  // reads 236-262mm here. On the numbers above a 220mm carrier reads back at about 215mm, so
-  // the disagreement is not in this code. Either the tape figure is wrong, or it measured a
-  // part that does not travel with the phone — a cable ratio between the stack and the
-  // carrier would do it exactly. Re-measure before anyone calibrates anything away.
+  // Against REAL equipment there is currently no reference at all. A pulldown was taped at
+  // roughly 220mm and read 236-262mm here, which the evidence summary reported as the app
+  // reading 7-19% high; on the numbers above a 220mm carrier reads back at about 215mm, so a
+  // reconstruction running 2.5% short cannot produce that. The coach has since withdrawn the
+  // tape figure as too rough to test against and is measuring properly. So the position is:
+  // characterised against synthetic truth, unverified on a machine, and no correction should
+  // be fitted to anything until a careful measurement exists.
+  //
+  // One thing to check when that measurement is made: whether the part being taped is the part
+  // the phone travels on. A cable ratio between the stack and the carrier would produce a
+  // discrepancy of exactly this shape, and lat pulldowns commonly have one.
   //
   // Also measured, and left alone: the FIRST stroke of a recording reads low while the filters
   // settle — 254mm against a true 300mm on one fixture. The bookend rules already set aside an
