@@ -212,7 +212,7 @@
 
   <header>
     <div>
-      <div class="brand">Prototype · velocity engine · build 17 Oct 08:19 UTC</div>
+      <div class="brand">Prototype · velocity engine · build 17 Oct 08:33 UTC</div>
       <h1>Rep Quality Scorer</h1>
     </div>
     <div class="status-row">
@@ -248,7 +248,7 @@
 
   <div class="panel set-hide stage-setup" id="panelTempo">
     <div class="panel-title">Target Tempo (seconds)</div>
-    <div style="font-size:11px;color:var(--dim);margin:-4px 0 10px;line-height:1.4;">Concentric raises the stack, eccentric lowers it — told apart by direction, not by which came first. Pauses are judged both ways. A stroke is judged on the fast side always, and on the slow side only where a slow allowance is set — by default the concentric is free to run long and the eccentric is not. How much either phase may be off before it costs marks is set per phase under <b>Phase allowance</b> below. A turnaround with no pause at all is scored as the longest hold that could have gone unseen, not skipped.</div>
+    <div style="font-size:11px;color:var(--dim);margin:-4px 0 10px;line-height:1.4;">Concentric raises the stack, eccentric lowers it — told apart by direction, not by which came first. Pauses are judged both ways. Every rep is scored against the target and the scores averaged, not the other way round, so a rushed rep cannot be cancelled by a slow one: four reps at 4s and four alternating 2s and 6s share a mean and no longer share a score. A stroke is judged on the fast side always, and on the slow side only where a slow allowance is set — by default the concentric is free to run long and the eccentric is not. How much either phase may be off before it costs marks is set per phase under <b>Phase allowance</b> below. A turnaround with no pause at all is scored as the longest hold that could have gone unseen, not skipped.</div>
     <div class="tempo-grid">
       <div class="tempo-field"><label>Concentric</label><input type="number" id="t1" value="4" step="0.5" min="0.5"></div>
       <div class="tempo-field"><label>Top pause</label><input type="number" id="p1" value="2" step="0.5" min="0"></div>
@@ -1904,9 +1904,27 @@ function coachingFor(slots) {
       const mean = shown.length ? avg(shown) : null;
       const sd = shown.length
         ? Math.sqrt(shown.reduce((a, v) => a + (v - mean) * (v - mean), 0) / shown.length) : null;
-      const jm = avg(judged);
-      const score = d.pause ? scorePause(jm, d.target, t.tol, d.grace, d.longGrace)
-                            : scorePhase(jm, d.target, t.tol, d.grace, d.slow);
+      // EVERY REP against the target, then averaged — not the average against the target.
+      //
+      // The difference is consistency, and under the old way it cost nothing. Four reps at 4s
+      // and four alternating 2s and 6s have the same mean, so they scored the same: a client
+      // who rushed every other rep and over-corrected on the next held full marks. The spread
+      // was on screen beside the number, saying plainly that the set was nothing like as even
+      // as the score implied, and no one reading the score had to look at it.
+      //
+      // Scoring each rep first closes that, because a rep that misses cannot be cancelled by
+      // one that misses the other way. The 2s rep scores 0 and the 6s rep scores what the slow
+      // side allows, and the phase takes the average of those rather than of the times. It is
+      // strictly the harsher reading wherever reps disagree and identical where they agree,
+      // since the scoring curve is flat on top: a set whose reps all sit inside the allowance
+      // still scores 100, exactly as before.
+      //
+      // It also makes the screen consistent with itself. The per-rep cards were already
+      // coloured rep by rep, so a card could show red above a phase row showing 100.
+      const each = judged.map(v => d.pause ? scorePause(v, d.target, t.tol, d.grace, d.longGrace)
+                                           : scorePhase(v, d.target, t.tol, d.grace, d.slow));
+      const score = avg(each);
+      const worstRep = Math.min.apply(null, each);
       // Travel is averaged over the same strokes that were timed, so the figure on screen
       // describes the range the set was actually worked through.
       let travel = null;
@@ -1915,7 +1933,8 @@ function coachingFor(slots) {
         if (tv.length) travel = tv.reduce((a, b) => a + b, 0) / tv.length;
       }
       return Object.assign({}, d, { n: shown.length, skipped: present.length - shown.length,
-                                    dropped: dropped, rated: true, mean, sd, score, travel });
+                                    dropped: dropped, rated: true, mean, sd, score, worstRep,
+                                    travel });
     });
   }
 
@@ -2849,12 +2868,22 @@ function coachingFor(slots) {
       targetSeconds: x.target, score: Math.round(x.score),
       travelMm: x.travel ? Math.round(x.travel * 1000) : null,
       samples: x.n, skippedSamples: x.skipped,
+      // The lowest-scoring single rep behind that average. A phase at 70 reached by every rep
+      // scoring 70 and one reached by half at 100 and half at 40 are different sets, and the
+      // mean alone cannot tell them apart.
+      worstRepScore: x.worstRep != null ? Math.round(x.worstRep) : null,
       // Strokes left out of this average for not covering the range. meanSeconds and travelMm
       // describe the strokes that remain, so the two always agree with each other.
       partialStrokesExcluded: x.dropped || 0 } : null; };
 
     return {
       schema: 'rep-scorer/1',
+      // Which scorer produced these numbers. Records written before 17 October carry no such
+      // field and were scored the other way round — the phase average against the target —
+      // which reads higher on any set whose reps disagree with each other. s1 scored 95 that
+      // way and 80 this way on the same recording. The two are not comparable and a history
+      // holding both needs to know which is which.
+      scoringMethod: 'per-rep',
       recordedAt: new Date().toISOString(),
       target: { concentric: t.conc, topPause: t.top, eccentric: t.ecc, bottomPause: t.btm },
       // Carried so a score can be reproduced: the same set under different weights is a
