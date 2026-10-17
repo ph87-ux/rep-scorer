@@ -212,7 +212,7 @@
 
   <header>
     <div>
-      <div class="brand">Prototype · velocity engine · build 17 Oct 08:56 UTC</div>
+      <div class="brand">Prototype · velocity engine · build 17 Oct 09:27 UTC</div>
       <h1>Rep Quality Scorer</h1>
     </div>
     <div class="status-row">
@@ -1464,6 +1464,29 @@ function coachingFor(slots) {
   // tempo-headroom check replaced it with a better question — not whether the stroke clears
   // a fixed bar, but whether it clears what the PRESCRIBED tempo needs, which at 4-2-4-2 is
   // about 160mm and at a quicker tempo far less. Removed rather than wired back up.
+  // Travel accuracy, measured rather than assumed. Synthetic sets were generated whose strokes
+  // are exactly 150mm, 220mm and 300mm by construction — a half-cosine acceleration profile
+  // integrates to a known displacement — carrying vertical noise at the level a real mount
+  // produces, and run through this app unchanged. It read them back at 148.1mm, 214.5mm and
+  // 290.8mm: 1.3%, 2.5% and 3.1% LOW. There is no systematic over-read anywhere in the
+  // reconstruction, and what bias exists is conservative.
+  //
+  // Per STROKE the scatter is much larger than that: a true 220mm stroke came back anywhere
+  // between 174mm and 240mm. So a single stroke's travel is worth about plus or minus 15%, and
+  // only the average over a set is worth 3%. Nothing on screen should be read as if one rep's
+  // distance were precise.
+  //
+  // This matters because the evidence summary reported the app as reading 7-19% HIGH on the
+  // one tape-measured machine, a pulldown whose carrier was taped at roughly 220mm and which
+  // reads 236-262mm here. On the numbers above a 220mm carrier reads back at about 215mm, so
+  // the disagreement is not in this code. Either the tape figure is wrong, or it measured a
+  // part that does not travel with the phone — a cable ratio between the stack and the
+  // carrier would do it exactly. Re-measure before anyone calibrates anything away.
+  //
+  // Also measured, and left alone: the FIRST stroke of a recording reads low while the filters
+  // settle — 254mm against a true 300mm on one fixture. The bookend rules already set aside an
+  // opening stroke that is badly short, and timing is unaffected, so this is recorded rather
+  // than corrected.
   const TRAVEL_MIN_MM = 100;
   // machines.json sits next to this file and holds the per-machine hold rules. It is fetched
   // rather than inlined so there is one copy to edit, and every failure path leaves the app
