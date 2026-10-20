@@ -212,7 +212,7 @@
 
   <header>
     <div>
-      <div class="brand">Prototype · velocity engine · build 20 Oct 10:19 UTC</div>
+      <div class="brand">Prototype · velocity engine · build 20 Oct 10:30 UTC</div>
       <h1>Rep Quality Scorer</h1>
     </div>
     <div class="status-row">
@@ -714,6 +714,15 @@ const COARSE_FRAC = 0.18; // pass 1 move threshold, as a fraction of typical pea
 const FINE_FRAC   = 0.05; // pass 2 move threshold
 const MIN_MOVE_S  = 0.35; // shortest credible stroke
 const MIN_HOLD_S  = 0.25; // shortest credible hold
+// The band a stroke has to sit in to count as a full one, as a fraction of the set's own
+// median. 0.65 below; its reciprocal, 1.54, above. One number governs both because a stroke
+// at 1.54x the median is exactly as far from it as one at 0.65x, and the measurements agree:
+// across sixteen recordings no MID-SET stroke anywhere exceeds 1.38x its median, while every
+// bookend that turned out to be an entry or exit aid runs 1.56x or more. The bar falls in the
+// gap between those two, with the margin on the side that matters — excluding a real rep
+// flatters a set, so the bar errs high.
+const PARTIAL_FRAC = 0.65;
+const PARTIAL_LONG = 1 / PARTIAL_FRAC;
 
 function filtfiltHz(arr, fc, hz) {
   const al = 1 - Math.exp(-2 * Math.PI * fc / hz);
@@ -968,7 +977,28 @@ function segmentVelocity(samples, opts) {
   // their good data was unusable. Measured: 2% spread on the exact fixtures, 11-15% on real
   // freehand and on a fatiguing set whose range genuinely shortens, 93% on a set with a
   // stack clang in it. Fatigue must not be flagged, so the bar sits well above 15%.
-  const strokeTravel = phases.map(p => p.travel);
+  //
+  // The bookends come out before that spread is measured, and only where they sit outside the
+  // band. Getting into a machine and getting out of it are not reps: on one chest press set
+  // the opening stroke ran 1.77x the median and the closing one 2.18x, between them driving
+  // the spread to 38% against the 40% bar that refuses a set outright, while the thirteen
+  // strokes in between agreed to 13%. Asking whether the reps agree with each other, and
+  // including two strokes that are not reps in the answer, measures the wrong thing. Only
+  // the two ends are eligible, because that is where the physical story is — an aid catches
+  // or releases the carrier as the client gets on and off — and a stroke in the middle that
+  // disagrees with its neighbours is exactly what this check exists to catch.
+  const tvAll = phases.map(p => p.travel);
+  let strokeTravel = tvAll;
+  if (tvAll.length >= 5) {
+    const m0 = median(tvAll);
+    if (m0 > 0) {
+      const outside = x => x < m0 * PARTIAL_FRAC || x > m0 * PARTIAL_LONG;
+      let lo = 0, hi = tvAll.length;
+      if (outside(tvAll[0])) lo++;
+      if (outside(tvAll[hi - 1])) hi--;
+      if (hi - lo >= 3) strokeTravel = tvAll.slice(lo, hi);
+    }
+  }
   let travelCV = null;
   if (strokeTravel.length >= 3) {
     const m = median(strokeTravel);
@@ -1243,7 +1273,18 @@ function coachingFor(slots) {
   // fatiguing set whose range of motion genuinely shortens rep by rep, 93% on a set
   // containing a stack clang. Fatigue is normal and must never be flagged, so the bar
   // sits far above 15% and only catches corruption.
-  const TRAVEL_SPREAD_BAD = 0.40;
+  // Lowered from 0.40 when the bookends came out of the spread. That change removed the two
+  // strokes most likely to disagree with the rest from every set's measurement, so every set
+  // now reads lower than it did — trunk 50% to 37%, neck 46% to 26%, a chest press set 38% to
+  // 13%. The bar was calibrated against the old measure, so leaving it at 0.40 would have
+  // loosened the gate without anyone deciding to: a torso set whose middle strokes run from
+  // 65mm to 278mm around a 195mm median went from refused to trusted on the strength of its
+  // bookends being removed, which is the opposite of what removing them was for.
+  //
+  // 0.30 restores every previous trust decision exactly. The worst set that still deserves to
+  // pass is the deliberately bad one at 25%, and the best set that should still be refused is
+  // the torso one at 37%, so the bar sits between them with margin on both sides.
+  const TRAVEL_SPREAD_BAD = 0.30;
   // A high travel spread is two different things that need opposite answers. Scattered rep to
   // rep, the reading is not usable. But a coach who tells a client mid-set to shorten the
   // range — "stop locking the knee out" — or to reach further makes the set two consistent
@@ -1367,7 +1408,6 @@ function coachingFor(slots) {
     return { needMm: need, haveMm: medTravelMm, slowestTarget: slowest, workableSeconds: ok };
   }
 
-  const PARTIAL_FRAC = 0.65;        // of the set's median stroke, below which a stroke is partial
   const PARTIAL_MIN_STROKES = 6;    // fewer than this and the median is not worth comparing to
   function partialsOf(res) {
     const reps = res.reps || [];
@@ -1381,9 +1421,17 @@ function coachingFor(slots) {
     const med = srt[srt.length >> 1];
     if (!(med > 0)) return null;
     const last = reps.length - 1;
-    const flagged = all.filter(x => x.tv < med * PARTIAL_FRAC);
+    // Short anywhere, long only at the ends. A short stroke mid-set is a rep the client cut
+    // and has a clear meaning; a LONG one mid-set has none that the measurements support, so
+    // it is left alone rather than given an invented one. At the ends the story is physical:
+    // an aid can leave the carrier travelling further than the client ever does under load,
+    // which is how one set produced a 287mm bookend around a 132mm working stroke.
+    const bookend = x => x.i === 0 || x.i === last;
+    const flagged = all.filter(x => x.tv < med * PARTIAL_FRAC
+                                 || (bookend(x) && x.tv > med * PARTIAL_LONG))
+                       .sort((a, b) => a.i - b.i);
     if (!flagged.length) return null;
-    const excluded = flagged.filter(x => x.i === 0 || x.i === last);
+    const excluded = flagged.filter(bookend);
     const has = (i, k) => excluded.some(f => f.i === i && f.key === k);
     // Named by the rep it sits in rather than by position in the recording: a rep's two
     // strokes are paired by direction, not by which came first, so the app cannot promise
@@ -1395,6 +1443,7 @@ function coachingFor(slots) {
       list: flagged.map(f => ({
         rep: f.i + 1, phase: f.key === 'conc' ? 'concentric' : 'eccentric',
         travelMm: f.tv * 1000, pctOfMedian: (f.tv / med) * 100,
+        kind: f.tv < med * PARTIAL_FRAC ? 'short' : 'long',
         where: f.i === 0 ? 'opening' : (f.i === last ? 'closing' : 'middle'),
         excluded: f.i === 0 || f.i === last
       }))
@@ -2315,7 +2364,13 @@ function coachingFor(slots) {
         + 'range is the hardest thing here to measure. The reps and the time under tension '
         + 'stand. The phase times may read short, and the set may not repeat. Either prescribe '
         + 'this machine nearer ' + headroom.workableSeconds.toFixed(2).replace(/0$/, '')
-        + 's a stroke, or treat its phase times as indicative only.';
+        + 's a stroke, or treat its phase times as indicative only.'
+        // Where the set's own longest stroke shows the machine has range the client did not
+        // use, a quicker tempo is the wrong first answer: the range is what is short.
+        + (maxTravel != null && maxTravel > headroom.needMm
+            ? ' Before changing the tempo, look at the range: one stroke in this set reached '
+              + maxTravel.toFixed(0) + 'mm, so the machine has more travel than the set used. '
+              + 'Working through it would fix this without touching the prescription.' : '');
     } else if (!velMethod && seg.peak > 0 && ratio < SIGNAL_UNUSABLE) {
       noteBad = true;
       note = 'Signal too weak: peak ' + seg.peak.toFixed(4) + ' m/s² is only ' + ratio.toFixed(1)
@@ -2369,32 +2424,44 @@ function coachingFor(slots) {
       const named = part.list.slice(0, 4).map(x => 'rep ' + x.rep + "'s " + x.phase + ' at '
         + x.travelMm.toFixed(0) + 'mm (' + x.pctOfMedian.toFixed(0) + '%)');
       const rest = part.list.length - named.length;
-      let line = (one ? 'One stroke did not cover the range: ' : part.list.length
-             + ' strokes did not cover the range: ')
+      // A bookend can be out of step in either direction: short where the aid takes the
+      // carrier part way, long where it lets the carrier run past anything the client reaches
+      // under load. Saying "did not cover the range" about a stroke at 177% of the median
+      // would be plainly wrong, so the sentence follows the data rather than the other way.
+      const anyLong = part.list.some(x => x.kind === 'long');
+      const anyShort = part.list.some(x => x.kind === 'short');
+      const what = (anyLong && anyShort) ? ' strokes were out of step with the rest of the set: '
+        : anyLong ? ' strokes travelled much further than the rest of the set: '
+        : ' strokes did not cover the range: ';
+      let line = (one ? 'One stroke' + what.replace(' strokes', '') : part.list.length + what)
         + named.join(', ') + (rest ? ' and ' + rest + ' more' : '')
         + ', against a set median of ' + part.medianMm.toFixed(0) + 'mm. ';
-      // What happened to them, which depends on where they sit and not on how short they were.
+      // What happened to them, which depends on where they sit and not on how far they went.
       line += nDrop === part.list.length
           ? (one ? 'It is at an end of the set and is' : 'They are at the ends of the set and are')
-            + ' left out of the phase averages: a stroke that travelled half as far cannot be '
-            + 'timed against a full-range target.'
+            + ' left out of the phase averages: a stroke that did not travel the same distance '
+            + 'as the rest cannot be timed against the same target.'
         : nDrop === 0
           ? 'All are mid-set, so all are scored — a rep cut short in the middle of a set is a '
             + 'fault, not the set starting or finishing.'
           : nDrop + ' at the ends of the set are left out of the phase averages; the rest are '
             + 'mid-set and are scored, because a rep cut short mid-set is a fault rather than '
             + 'the set starting or finishing.';
-      line += ' Every rep is still counted and every time still shown, marked.';
-      // Worded by position, because the same short stroke means different things at each end
-      // of a set and the coach needs the difference.
+      line += ' Every rep is still counted, every time is still shown, and the time under '
+            + 'tension includes them \u2014 the client was on the machine for those seconds. '
+            + 'Only the quality score leaves them out.';
+      // Worded by position, because the same odd stroke means different things at each end of
+      // a set and the coach needs the difference.
       if (has('opening'))
-        line += ' A short stroke at the start is usually getting into position rather than '
-             + 'lifting — an entry aid, a grip being taken, the seat being settled.';
+        line += ' A stroke at the start that does not match the rest is usually getting into '
+             + 'position rather than lifting — an entry aid, a grip being taken, the seat being '
+             + 'settled. An aid can leave the carrier travelling further than the client ever '
+             + 'does under load, as readily as less.';
       if (has('closing'))
-        line += ' A short stroke at the end is the set finishing: most often an exit aid '
-             + 'catching the stack so it can be let go of safely, and otherwise a rep that '
-             + 'failed part way or the recording stopping before the stack came back. The '
-             + 'trace cannot tell those apart, so the stroke is set aside rather than read.';
+        line += ' A stroke at the end is the set finishing: most often an exit aid catching the '
+             + 'stack so it can be let go of safely, and otherwise a rep that failed part way '
+             + 'or the recording stopping before the stack came back. The trace cannot tell '
+             + 'those apart, so the stroke is set aside rather than read.';
       if (has('middle'))
         line += ' A short stroke mid-set is worth asking about: the reps around it covered the '
              + 'full range.';
