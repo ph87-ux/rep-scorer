@@ -123,8 +123,9 @@
       "bottomHold": "LOADED",
       "maxStackTravelMm": null,
       "targetTempo": null,
-      "notes": "Multi-joint but a PULL, so there is no lockout: the stack-up position is the most challenging point of the movement, with the back holding the handle in against the load. Confirmed by the coach. LOADED despite sharing a joint count with the pressing machines, which is why the divide is push versus pull. Often geared 2:1, which would halve the travel the phone sees.",
-      "needsConfirmation": false
+      "notes": "Multi-joint but a PULL, so there is no lockout: the stack-up position is the most challenging point of the movement, with the back holding the handle in against the load. Confirmed by the coach. LOADED despite sharing a joint count with the pressing machines, which is why the divide is push versus pull. Often geared 2:1, which would halve the travel the phone sees. Confirmed by the coach as workable one side at a time, so left and right are recorded separately.",
+      "needsConfirmation": false,
+      "unilateral": true
     },
     {
       "code": "C3",
@@ -133,8 +134,9 @@
       "bottomHold": "LOADED",
       "maxStackTravelMm": null,
       "targetTempo": null,
-      "notes": "Multi-joint but a PULL, so there is no lockout: the stack-up position is the most challenging point of the movement, with the back holding the handle in against the load. Confirmed by the coach. LOADED despite sharing a joint count with the pressing machines, which is why the divide is push versus pull. Often geared 2:1, which would halve the travel the phone sees.",
-      "needsConfirmation": false
+      "notes": "Multi-joint but a PULL, so there is no lockout: the stack-up position is the most challenging point of the movement, with the back holding the handle in against the load. Confirmed by the coach. LOADED despite sharing a joint count with the pressing machines, which is why the divide is push versus pull. Often geared 2:1, which would halve the travel the phone sees. Confirmed by the coach as workable one side at a time, so left and right are recorded separately.",
+      "needsConfirmation": false,
+      "unilateral": true
     },
     {
       "code": "F1.1",
