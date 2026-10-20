@@ -212,7 +212,7 @@
 
   <header>
     <div>
-      <div class="brand">Prototype · velocity engine · build 20 Oct 09:04 UTC</div>
+      <div class="brand">Prototype · velocity engine · build 20 Oct 10:09 UTC</div>
       <h1>Rep Quality Scorer</h1>
     </div>
     <div class="status-row">
@@ -1076,17 +1076,36 @@ const FAST_GRACE_FRAC = 0.15;
 // That is right for the concentric and wrong for the lowering, where a stroke that runs long
 // is a client losing control of the weight rather than earning extra work, so the eccentric
 // gets a slow side of its own.
-function scorePhase(actual, target, tol, graceFrac, slowFrac) {
+// How far past its allowance a phase runs before it scores nothing. ONE number, deliberately,
+// because there were two and they disagreed.
+//
+// The scorer took a tolerance as an argument, and the two callers passed different things.
+// phaseSlots — which produces the score — passed 0.6 for strokes AND for pauses, so every
+// phase fell off over 1.2s. The per-rep cards passed the 0.25s hold floor for pauses, so a
+// card fell off over 0.5s. The same 1.0s hold against a 2.0s target was therefore coloured as
+// a 0 on the card and scored as a 42 in the phase row, and nothing said which was meant.
+//
+// The coach was asked which curve was right and chose the scorer's: a hold stays more
+// forgiving than a stroke. On the current allowances a 4s stroke reaches zero 40% below
+// target and a 2s hold reaches it 75% below, and that is now a stated position rather than an
+// accident of which function happened to be reading it. Scores are unchanged; the cards move
+// to match them.
+//
+// The tolerance arguments are gone rather than aligned. An argument two callers can disagree
+// about will be disagreed about again.
+const FALLOFF_S = 1.2;
+
+function scorePhase(actual, target, graceFrac, slowFrac) {
   const band = f => Math.max(0.15, target * f);
   if (actual < target) {
     const err = target - actual, grace = band(graceFrac == null ? FAST_GRACE_FRAC : graceFrac);
     if (err <= grace) return 100;
-    return Math.max(0, 100 - ((err - grace) / (tol * 2)) * 100);
+    return Math.max(0, 100 - ((err - grace) / FALLOFF_S) * 100);
   }
   if (slowFrac == null) return 100;
   const err = actual - target, grace = band(slowFrac);
   if (err <= grace) return 100;
-  return Math.max(0, 100 - ((err - grace) / (tol * 2)) * 100);
+  return Math.max(0, 100 - ((err - grace) / FALLOFF_S) * 100);
 }
 
 // A pause is wrong in both directions — too short loses the hold, too long bleeds tension —
@@ -1102,17 +1121,17 @@ function scorePhase(actual, target, tol, graceFrac, slowFrac) {
 // Cutting a hold short deducts either way, on every machine and at both ends. The
 // classification only ever decides whether running LONG costs anything.
 const PAUSE_BAND = 0.20;
-function scorePause(actual, target, tol, shortFrac, longFrac) {
+function scorePause(actual, target, shortFrac, longFrac) {
   const band = f => Math.max(0.15, target * f);
   if (actual < target) {
     const err = target - actual, grace = band(shortFrac == null ? PAUSE_BAND : shortFrac);
     if (err <= grace) return 100;
-    return Math.max(0, 100 - ((err - grace) / (tol * 2)) * 100);
+    return Math.max(0, 100 - ((err - grace) / FALLOFF_S) * 100);
   }
   if (longFrac == null) return 100;
   const err = actual - target, grace = band(longFrac);
   if (err <= grace) return 100;
-  return Math.max(0, 100 - ((err - grace) / (tol * 2)) * 100);
+  return Math.max(0, 100 - ((err - grace) / FALLOFF_S) * 100);
 }
 
 // Turns each rep into the four direction-keyed slots the rest of the app reads. It used to
@@ -1749,7 +1768,6 @@ function coachingFor(slots) {
       p2: parseFloat($('t2').value) || 4, q2: parseFloat($('p2').value) || 2,
       conc: parseFloat($('t1').value) || 4, top: parseFloat($('p1').value) || 2,
       ecc: parseFloat($('t2').value) || 4, btm: parseFloat($('p2').value) || 2,
-      tol: 0.6, minPause: MIN_HOLD_S,
       // Weights are a coaching input, not a view this app holds. Equal by default, so the
       // score says nothing about which phase matters until somebody decides that it does.
       // || would swallow a deliberate 0, which is the one weight worth setting precisely.
@@ -2003,8 +2021,8 @@ function coachingFor(slots) {
       //
       // It also makes the screen consistent with itself. The per-rep cards were already
       // coloured rep by rep, so a card could show red above a phase row showing 100.
-      const each = judged.map(v => d.pause ? scorePause(v, d.target, t.tol, d.grace, d.longGrace)
-                                           : scorePhase(v, d.target, t.tol, d.grace, d.slow));
+      const each = judged.map(v => d.pause ? scorePause(v, d.target, d.grace, d.longGrace)
+                                           : scorePhase(v, d.target, d.grace, d.slow));
       const score = avg(each);
       const worstRep = Math.min.apply(null, each);
       // Travel is averaged over the same strokes that were timed, so the figure on screen
@@ -2020,7 +2038,7 @@ function coachingFor(slots) {
     });
   }
 
-  function cell(label, val, target, tol, noHold, isPause, grace, slow, longGrace, partial) {
+  function cell(label, val, target, noHold, isPause, grace, slow, longGrace, partial) {
     if (val === null || val === undefined) return '<div class="pt"><span class="ptk">' + label + '</span><span class="ptv">—</span></div>';
     // The time still shown, because it was measured, but unscored and marked: this stroke did
     // not cover the range, so there is no target it can honestly be held against.
@@ -2030,8 +2048,8 @@ function coachingFor(slots) {
     // not separable, so the figure is an artefact of where the threshold happened to fall.
     if (noHold) return '<div class="pt" style="opacity:.55"><span class="ptk">' + label
       + '</span><span class="ptv" style="font-size:11px">no<br>pause</span></div>';
-    const cls = scoreClass(isPause ? scorePause(val, target, tol, grace, longGrace)
-                                   : scorePhase(val, target, tol, grace, slow));
+    const cls = scoreClass(isPause ? scorePause(val, target, grace, longGrace)
+                                   : scorePhase(val, target, grace, slow));
     return '<div class="pt"><span class="ptk">' + label + '</span><span class="ptv ' + cls + '">' + val.toFixed(1) + 's</span></div>';
   }
 
@@ -2062,13 +2080,13 @@ function coachingFor(slots) {
         d.innerHTML =
           '<div class="rep-card-top"><div class="rep-num">REP ' + (i + 1) + '</div></div>' +
           '<div class="phase-times">' +
-            cell('CONC', r.concentric, tgt.conc, tgt.tol, false, false, tgt.gConc, tgt.sConc, null,
+            cell('CONC', r.concentric, tgt.conc, false, false, tgt.gConc, tgt.sConc, null,
                  !!(part && part.conc[i])) +
-            cell('TOP', r.topPause, tgt.top, tgt.minPause, r.topNoHold, true, tgt.gTop, null,
+            cell('TOP', r.topPause, tgt.top, r.topNoHold, true, tgt.gTop, null,
                  tgt.holdTop === 'LOADED' ? null : tgt.gTop) +
-            cell('ECC', r.eccentric, tgt.ecc, tgt.tol, false, false, tgt.gEcc, eccSlowShown, null,
+            cell('ECC', r.eccentric, tgt.ecc, false, false, tgt.gEcc, eccSlowShown, null,
                  !!(part && part.ecc[i])) +
-            cell('BTM', r.bottomPause, tgt.btm, tgt.minPause, r.bottomNoHold, true, tgt.gBtm, null,
+            cell('BTM', r.bottomPause, tgt.btm, r.bottomNoHold, true, tgt.gBtm, null,
                  tgt.holdBtm === 'LOADED' ? null : tgt.gBtm) +
           '</div>';
         repList.appendChild(d);
