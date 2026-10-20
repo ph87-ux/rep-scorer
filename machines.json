@@ -192,6 +192,16 @@
       "needsConfirmation": false
     },
     {
+      "code": "G1",
+      "name": "Shrug",
+      "topHold": "LOADED",
+      "bottomHold": "LOADED",
+      "maxStackTravelMm": null,
+      "targetTempo": null,
+      "notes": "Single joint, scapular elevation. Nothing bony stops the scapula rising, so there is no lockout at the top and the traps hold the stack there: LOADED. Bottom is LOADED by the coached-hover policy and by the classification test as it is written — with the plates held off, a client who relaxed completely would drop the stack. Worth a second look all the same: at full depression a shrug hangs partly on passive structures rather than on working muscle, which is a finer distinction than \"would the stack move\" can catch, and if the coach wants the bottom treated as rest this is the machine to say so about. Recorded as bilateral because nothing has been said otherwise. Likely short in the stack: scapular elevation covers little distance, so like B8 and the two rotation machines this is a candidate for the short-stroke limit and worth taping early.",
+      "needsConfirmation": false
+    },
+    {
       "code": "G5",
       "name": "Neck Extension",
       "topHold": "LOADED",
