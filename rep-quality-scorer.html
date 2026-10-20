@@ -212,7 +212,7 @@
 
   <header>
     <div>
-      <div class="brand">Prototype · velocity engine · build 20 Oct 10:09 UTC</div>
+      <div class="brand">Prototype · velocity engine · build 20 Oct 10:19 UTC</div>
       <h1>Rep Quality Scorer</h1>
     </div>
     <div class="status-row">
@@ -1093,6 +1093,15 @@ const FAST_GRACE_FRAC = 0.15;
 //
 // The tolerance arguments are gone rather than aligned. An argument two callers can disagree
 // about will be disagreed about again.
+//
+// One thing this leaves standing, recorded so it is not rediscovered the hard way. The
+// ALLOWANCE is a fraction of the target and this falloff is a count of seconds, so the shape
+// of the curve moves with the prescription: at 2-1-2-1 a stroke would reach zero 70% below
+// target while a hold still reached it at 40%, reversing which phase is judged more harshly.
+// It does not bite, because the coach has fixed the estate at 4-2-4-2 and that is the one
+// tempo where the two sit where they are intended to. If the prescription ever changes, this
+// is the first thing to revisit: a falloff proportional to target fixes it, was built and
+// measured, and was declined only because it would also have tightened holds.
 const FALLOFF_S = 1.2;
 
 function scorePhase(actual, target, graceFrac, slowFrac) {
