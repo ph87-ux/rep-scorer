@@ -158,6 +158,16 @@
       "needsConfirmation": false
     },
     {
+      "code": "G5",
+      "name": "Neck Extension",
+      "topHold": "LOADED",
+      "bottomHold": "LOADED",
+      "maxStackTravelMm": null,
+      "targetTempo": null,
+      "notes": "Single joint through the cervical spine. There is no position where the skeleton can take the load off the neck extensors, so the top is LOADED by the same rule as the other single-joint machines, and the bottom is LOADED by the coached-hover policy. Classified by that rule rather than confirmed one machine at a time, as B5, B8, C7 and C3 were. OUT OF THE MEASUREMENT ENVELOPE as things stand: a set recorded on it read 18-23mm a stroke and was refused outright for moving less than the 100mm floor, the app naming the reason as \"stack moved only 19mm per rep\". That figure is one client's stroke, not the machine's hard-stop maximum, so the maximum is still worth taping — but at a fifth of the floor it would have to be far larger than anything observed for this machine to come back in, and the hold classification is moot until it does.",
+      "needsConfirmation": false
+    },
+    {
       "code": "H1",
       "name": "Curl",
       "topHold": "LOADED",
