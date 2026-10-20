@@ -13,6 +13,16 @@
   },
   "machines": [
     {
+      "code": "A1",
+      "name": "Hip Extension",
+      "topHold": "LOADED",
+      "bottomHold": "LOADED",
+      "maxStackTravelMm": null,
+      "targetTempo": null,
+      "notes": "Single joint at the hip. The top was the doubtful end, because a hip extension machine could reach a stop at full extension the way B6 Leg Press reaches a knee lockout, which would shed the load and make it REST. Confirmed by the coach on 20 October that the stack would drop if the client relaxed there, so the top is LOADED and a long hold at full extension is work rather than rest. Bottom is LOADED by the coached-hover policy. Worked with both legs.",
+      "needsConfirmation": false
+    },
+    {
       "code": "B1",
       "name": "Leg Extension",
       "topHold": "LOADED",
@@ -103,6 +113,28 @@
       "maxStackTravelMm": null,
       "targetTempo": null,
       "notes": "Same rules as B6 Leg Press: elbows lock out at the top and the load passes through the skeleton, so the hold there is rest however it is coached. Bottom is a coached hover and stays loaded. One physical machine with two grips, recorded as separate codes so each keys cleanly and can carry its own travel. Grip-to-code mapping taken as front=E3, rear=E1 — swap if that is the wrong way round.",
+      "needsConfirmation": false
+    },
+    {
+      "code": "E4.1",
+      "name": "Internal Rotation (humerus)",
+      "topHold": "LOADED",
+      "bottomHold": "LOADED",
+      "maxStackTravelMm": null,
+      "targetTempo": null,
+      "notes": "Single joint at the shoulder, rotating the humerus. There is no position in the range where the joint locks out and passes the load to the frame, so both ends are LOADED by the same rule as the other single-joint machines. Worked one arm at a time, and left and right are kept apart because they are different work and an imbalance between them is the thing most worth seeing on a rotation machine. Rotator-cuff machines move the stack a short way, so this is a likely candidate for the short-stroke limit: tape the maximum early. The app will say per set whether the stroke can carry the prescribed tempo, and at 4-2-4-2 that needs roughly 160mm.",
+      "unilateral": true,
+      "needsConfirmation": false
+    },
+    {
+      "code": "E5.1",
+      "name": "External Rotation (humerus)",
+      "topHold": "LOADED",
+      "bottomHold": "LOADED",
+      "maxStackTravelMm": null,
+      "targetTempo": null,
+      "notes": "Single joint at the shoulder, rotating the humerus. There is no position in the range where the joint locks out and passes the load to the frame, so both ends are LOADED by the same rule as the other single-joint machines. Worked one arm at a time, and left and right are kept apart because they are different work and an imbalance between them is the thing most worth seeing on a rotation machine. Rotator-cuff machines move the stack a short way, so this is a likely candidate for the short-stroke limit: tape the maximum early. The app will say per set whether the stroke can carry the prescribed tempo, and at 4-2-4-2 that needs roughly 160mm.",
+      "unilateral": true,
       "needsConfirmation": false
     },
     {

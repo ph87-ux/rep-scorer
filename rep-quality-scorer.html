@@ -212,7 +212,7 @@
 
   <header>
     <div>
-      <div class="brand">Prototype · velocity engine · build 20 Oct 08:39 UTC</div>
+      <div class="brand">Prototype · velocity engine · build 20 Oct 08:42 UTC</div>
       <h1>Rep Quality Scorer</h1>
     </div>
     <div class="status-row">
@@ -1506,6 +1506,7 @@ function coachingFor(slots) {
   // Regenerate from machines.json whenever a hold classification there changes; only the four
   // fields the app actually reads are copied.
   const MACHINES_BUILTIN = [
+    {code:'A1', name:"Hip Extension", topHold:'LOADED', bottomHold:'LOADED'},
     {code:'B1', name:"Leg Extension", topHold:'LOADED', bottomHold:'LOADED', unilateral:true},
     {code:'B5', name:"Leg Curl", topHold:'LOADED', bottomHold:'LOADED'},
     {code:'B7', name:"Leg Curl (seated)", topHold:'LOADED', bottomHold:'LOADED', unilateral:true},
@@ -1515,6 +1516,8 @@ function coachingFor(slots) {
     {code:'D7', name:"Seated Dip", topHold:'REST', bottomHold:'LOADED'},
     {code:'E3', name:"Overhead Press (front grip)", topHold:'REST', bottomHold:'LOADED'},
     {code:'E1', name:"Overhead Press (rear grip)", topHold:'REST', bottomHold:'LOADED'},
+    {code:'E4.1', name:"Internal Rotation (humerus)", topHold:'LOADED', bottomHold:'LOADED', unilateral:true},
+    {code:'E5.1', name:"External Rotation (humerus)", topHold:'LOADED', bottomHold:'LOADED', unilateral:true},
     {code:'C1', name:"Pullover", topHold:'LOADED', bottomHold:'LOADED', unilateral:true},
     {code:'C7', name:"Row", topHold:'LOADED', bottomHold:'LOADED', unilateral:true},
     {code:'C3', name:"Pulldown", topHold:'LOADED', bottomHold:'LOADED', unilateral:true},
