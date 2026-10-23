@@ -23,6 +23,26 @@
       "needsConfirmation": false
     },
     {
+      "code": "A3",
+      "name": "Hip Abduction",
+      "topHold": "LOADED",
+      "bottomHold": "LOADED",
+      "maxStackTravelMm": null,
+      "targetTempo": null,
+      "notes": "Legs driven apart against the pads. Nothing skeletal can take over at full abduction: relax and the stack pulls the legs back together, so the top is LOADED. Bottom is LOADED by the coached-hover policy. Worked with both legs.",
+      "needsConfirmation": false
+    },
+    {
+      "code": "A4",
+      "name": "Hip Adduction",
+      "topHold": "LOADED",
+      "bottomHold": "LOADED",
+      "maxStackTravelMm": null,
+      "targetTempo": null,
+      "notes": "Legs squeezed together against the pads. Classified LOADED at the top on the same reasoning as A3 — the load pulls the legs apart, so a relaxed client loses the position and the stack drops. The one way this is wrong is if the lever reaches its own hard stop before the legs meet, which would pass the load to the frame and make the top REST. NEEDS CONFIRMATION: at full squeeze, is it the client's legs meeting that stops the movement, or the machine's own stop? Bottom is LOADED by the coached-hover policy. Worked with both legs.",
+      "needsConfirmation": true
+    },
+    {
       "code": "B1",
       "name": "Leg Extension",
       "topHold": "LOADED",
@@ -96,6 +116,16 @@
       "needsConfirmation": false
     },
     {
+      "code": "D5",
+      "name": "Arm Cross",
+      "topHold": "LOADED",
+      "bottomHold": "LOADED",
+      "maxStackTravelMm": null,
+      "targetTempo": null,
+      "notes": "Arms brought together across the chest. Classified LOADED at the top on the same reasoning as A4: the load pulls the arms apart, so relaxing loses the position. Distinct from D6 Chest Press, which is REST at the top because the elbow locks out and the skeleton takes the load — there is no lockout here. The one way this is wrong is if the levers meet their own stop before the arms finish crossing. NEEDS CONFIRMATION: at full cross, is it your arms coming together that ends the movement, or the machine's stop? Bottom is LOADED by the coached-hover policy. Worked with both arms.",
+      "needsConfirmation": true
+    },
+    {
       "code": "E3",
       "name": "Overhead Press (front grip)",
       "topHold": "REST",
@@ -113,6 +143,17 @@
       "maxStackTravelMm": null,
       "targetTempo": null,
       "notes": "Same rules as B6 Leg Press: elbows lock out at the top and the load passes through the skeleton, so the hold there is rest however it is coached. Bottom is a coached hover and stays loaded. One physical machine with two grips, recorded as separate codes so each keys cleanly and can carry its own travel. Grip-to-code mapping taken as front=E3, rear=E1 — swap if that is the wrong way round.",
+      "needsConfirmation": false
+    },
+    {
+      "code": "E2",
+      "name": "Lateral Raise",
+      "topHold": "LOADED",
+      "bottomHold": "LOADED",
+      "maxStackTravelMm": null,
+      "targetTempo": null,
+      "notes": "Shoulder abduction against the pads. The deltoid carries the load through the whole range and there is no lockout at the top, unlike the overhead presses E1 and E3. Bottom is LOADED by the coached-hover policy.",
+      "unilateral": true,
       "needsConfirmation": false
     },
     {
@@ -169,6 +210,27 @@
       "notes": "Multi-joint but a PULL, so there is no lockout: the stack-up position is the most challenging point of the movement, with the back holding the handle in against the load. Confirmed by the coach. LOADED despite sharing a joint count with the pressing machines, which is why the divide is push versus pull. Often geared 2:1, which would halve the travel the phone sees. Confirmed by the coach as workable one side at a time, so left and right are recorded separately.",
       "needsConfirmation": false,
       "unilateral": true
+    },
+    {
+      "code": "C2",
+      "name": "Torso Arm (supinated grip)",
+      "topHold": "LOADED",
+      "bottomHold": "LOADED",
+      "maxStackTravelMm": null,
+      "targetTempo": null,
+      "notes": "Pulling movement with the elbow flexing, supinated grip. No lockout anywhere in the range, so the lats and arm hold the stack at the top of the contraction. Bottom is LOADED by the coached-hover policy.",
+      "unilateral": true,
+      "needsConfirmation": false
+    },
+    {
+      "code": "C5",
+      "name": "Torso Row",
+      "topHold": "LOADED",
+      "bottomHold": "LOADED",
+      "maxStackTravelMm": null,
+      "targetTempo": null,
+      "notes": "Pulling movement. The elbow cannot lock out into a position that sheds the load, so the top of the contraction is held by the muscle. Same classification as C7 Row. Bottom is LOADED by the coached-hover policy. Worked with both arms.",
+      "needsConfirmation": false
     },
     {
       "code": "F1.1",
