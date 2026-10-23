@@ -1609,7 +1609,7 @@ function coachingFor(slots) {
   // rather than inlined so there is one copy to edit, and every failure path leaves the app
   // exactly as it was without it: no machine selected means the configured allowances apply
   // to both ends, which is what the app did before the file was read at all.
-  // The same eleven, inlined. machines.json stays the source of truth and is read in
+  // The same list, inlined. machines.json stays the source of truth and is read in
   // preference to this, but a fetch has a dozen ways to fail — offline, opened as a file, a
   // stale cache, a host that will not serve .json — and every one of them failed SILENTLY:
   // the list came up empty, no error appeared, and every hold went back to being judged both
@@ -1619,6 +1619,8 @@ function coachingFor(slots) {
   // fields the app actually reads are copied.
   const MACHINES_BUILTIN = [
     {code:'A1', name:"Hip Extension", topHold:'LOADED', bottomHold:'LOADED'},
+    {code:'A3', name:"Hip Abduction", topHold:'LOADED', bottomHold:'LOADED'},
+    {code:'A4', name:"Hip Adduction", topHold:'LOADED', bottomHold:'LOADED'},
     {code:'B1', name:"Leg Extension", topHold:'LOADED', bottomHold:'LOADED', unilateral:true},
     {code:'B5', name:"Leg Curl", topHold:'LOADED', bottomHold:'LOADED'},
     {code:'B7', name:"Leg Curl (seated)", topHold:'LOADED', bottomHold:'LOADED', unilateral:true},
@@ -1626,13 +1628,17 @@ function coachingFor(slots) {
     {code:'B6', name:"Leg Press", topHold:'REST', bottomHold:'LOADED', unilateral:true},
     {code:'D6', name:"Chest Press", topHold:'REST', bottomHold:'LOADED'},
     {code:'D7', name:"Seated Dip", topHold:'REST', bottomHold:'LOADED'},
+    {code:'D5', name:"Arm Cross", topHold:'LOADED', bottomHold:'LOADED'},
     {code:'E3', name:"Overhead Press (front grip)", topHold:'REST', bottomHold:'LOADED'},
     {code:'E1', name:"Overhead Press (rear grip)", topHold:'REST', bottomHold:'LOADED'},
+    {code:'E2', name:"Lateral Raise", topHold:'LOADED', bottomHold:'LOADED', unilateral:true},
     {code:'E4.1', name:"Internal Rotation (humerus)", topHold:'LOADED', bottomHold:'LOADED', unilateral:true},
     {code:'E5.1', name:"External Rotation (humerus)", topHold:'LOADED', bottomHold:'LOADED', unilateral:true},
     {code:'C1', name:"Pullover", topHold:'LOADED', bottomHold:'LOADED', unilateral:true},
     {code:'C7', name:"Row", topHold:'LOADED', bottomHold:'LOADED', unilateral:true},
     {code:'C3', name:"Pulldown", topHold:'LOADED', bottomHold:'LOADED', unilateral:true},
+    {code:'C2', name:"Torso Arm (supinated grip)", topHold:'LOADED', bottomHold:'LOADED', unilateral:true},
+    {code:'C5', name:"Torso Row", topHold:'LOADED', bottomHold:'LOADED'},
     {code:'F1.1', name:"Trunk Rotation", topHold:'LOADED', bottomHold:'LOADED', unilateral:true},
     {code:'F2.1', name:"Trunk Flexion", topHold:'LOADED', bottomHold:'LOADED'},
     {code:'G1', name:"Shrug", topHold:'LOADED', bottomHold:'LOADED'},
