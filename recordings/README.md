@@ -105,12 +105,18 @@ them, which is why the files are now here under their own timestamps.
 
 In the order that would help most:
 
-1. **A set recorded on video**, scored frame by frame, so phase timing has a real reference
-   rather than a synthetic one.
+1. **One set filmed side-on to the stack**, which settles two things at once. Footage of the
+   D6 chest press on 24 October showed the plate labels are legible at phone resolution from
+   several feet away — the main stack runs 240, 260 … 540 in 20-unit steps, one per plate, with
+   a fine 2–20 stack above it. So a video of a real set gives phase boundaries frame by frame
+   *and* stack travel read straight off the plates the carrier passes, tied to the exact set
+   the app scored rather than to a separate measurement. Shoot it square to the stack with the
+   whole travel in frame and a clap or tap to sync.
 2. **Blind coach marks.** One set has one. Ten would make the score comparison quotable. The
    mark has to be written down before the score is seen, every time.
-3. **Measured stack travel** per machine, hard stop to hard stop — `maxStackTravelMm` in
-   `machines.json` is null on all 26.
+3. **Measured stack travel on the remaining machines** — `maxStackTravelMm` in `machines.json`
+   is null on all 26. A tape, hard stop to hard stop, is still the quick way to cover machines
+   nobody is going to film.
 4. **More failure labels**, and ideally the lifter's own pacing intent alongside them. The
    fatigue rule fires on one of the three labelled failure sets, and both misses are sets where
    the lift got *faster* across the reps because the lifter was pacing to a clock.
