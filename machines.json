@@ -39,8 +39,8 @@
       "bottomHold": "LOADED",
       "maxStackTravelMm": null,
       "targetTempo": null,
-      "notes": "Legs squeezed together against the pads. Classified LOADED at the top on the same reasoning as A3 — the load pulls the legs apart, so a relaxed client loses the position and the stack drops. The one way this is wrong is if the lever reaches its own hard stop before the legs meet, which would pass the load to the frame and make the top REST. NEEDS CONFIRMATION: at full squeeze, is it the client's legs meeting that stops the movement, or the machine's own stop? Bottom is LOADED by the coached-hover policy. Worked with both legs.",
-      "needsConfirmation": true
+      "notes": "Legs squeezed together against the pads. Confirmed by the coach on 24 October: the top is LOADED. The load pulls the legs apart, so a relaxed client loses the position and the stack drops. The lever does not reach a hard stop before the legs meet, which was the one way this could have been REST. Bottom is LOADED by the coached-hover policy. Worked with both legs.",
+      "needsConfirmation": false
     },
     {
       "code": "B1",
@@ -122,8 +122,8 @@
       "bottomHold": "LOADED",
       "maxStackTravelMm": null,
       "targetTempo": null,
-      "notes": "Arms brought together across the chest. Classified LOADED at the top on the same reasoning as A4: the load pulls the arms apart, so relaxing loses the position. Distinct from D6 Chest Press, which is REST at the top because the elbow locks out and the skeleton takes the load — there is no lockout here. The one way this is wrong is if the levers meet their own stop before the arms finish crossing. NEEDS CONFIRMATION: at full cross, is it your arms coming together that ends the movement, or the machine's stop? Bottom is LOADED by the coached-hover policy. Worked with both arms.",
-      "needsConfirmation": true
+      "notes": "Arms brought together across the chest. Confirmed by the coach on 24 October: the top is LOADED. The load pulls the arms apart, so relaxing loses the position, and the levers do not reach a stop that would take the load first. This is the contrast that made D6 Chest Press worth re-checking the same day. Both movements bring the handles toward the midline, and they differ only because the press also reaches elbow extension and sheds the load to the skeleton, while this one ends with the arms meeting under tension. A converging path is not a lockout. Bottom is LOADED by the coached-hover policy. Worked with both arms.",
+      "needsConfirmation": false
     },
     {
       "code": "E3",
@@ -289,7 +289,7 @@
     "bottomPosition": "HOVER",
     "note": "Clients are always coached to hover at the bottom rather than set the plates down. A hovered stack stays suspended, so the muscle is still holding it and the bottom hold is LOADED by default across the estate. A machine only overrides this if its own bottom position genuinely sheds the load."
   },
-  "notes": "The divide is push versus pull, not single-joint versus multi-joint. Pressing movements lock out and the skeleton takes the load, so their top hold is REST. Pulling movements have no lockout and the muscle holds throughout, so their top hold is LOADED however many joints are involved.",
+  "notes": "What decides the top hold is whether the movement ends at a joint lockout. A press reaches extension and the skeleton takes the load, so its top hold is REST. Everything else holds the load in the muscle and is LOADED at the top, however many joints are involved: pulls, which have no lockout available, and the movements that finish with two limbs meeting or a muscle at its shortest. The earlier form of this rule said push versus pull, which covered the estate until adduction and convergence machines were added and did not describe them at all. Convergence in particular is not lockout: D6 Chest Press and D5 Arm Cross both travel toward the midline and differ only in that the press reaches extension. Both were checked on 24 October and they land on opposite sides.",
   "defaultTargetTempo": {
     "notation": "4-2-4-2",
     "concentricSeconds": 4,
