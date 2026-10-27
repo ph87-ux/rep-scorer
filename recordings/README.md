@@ -51,6 +51,8 @@ neighbouring row. In particular:
 | `2026-10-20-0911-clock-paced-4` | not recorded | Uploaded without comment |
 | `2026-10-20-0917-clock-paced-5` | not recorded | Uploaded without comment |
 | `2026-10-23-2113-h1-curl-failure` | H1 Curl, both arms | **Muscular failure.** The final rep was **a failed rep** — the coach confirmed they could not complete the range, rather than it being an exit aid or setting the stack down. It reads 109mm up and 103mm down against a 266mm median. Whether the mount differed from the 16 October curl set is not recalled |
+| `2026-10-27-0910-f21-trunk-flexion-hole3` | F2.1 Trunk Flexion | Range-limiting pin at **hole 3**. One of a pair recorded six minutes apart on one machine, differing only in the pin |
+| `2026-10-27-0916-f21-trunk-flexion-hole2` | F2.1 Trunk Flexion | Range-limiting pin at **hole 2**, the restricted setting. The pair with the set above |
 
 ## Baseline, build 23 October 2026
 
@@ -83,8 +85,10 @@ row is the thing most worth catching.
 | `10-20-0911-clock-paced-4` | 7 | 74.6s | 78 | yes | 3.76 | 1.63 | 4.30 | 1.34 | 256mm | 9% | — |
 | `10-20-0917-clock-paced-5` | 7 | 77.6s | 71 | yes | 4.71 | 1.16 | 4.33 | 2.17 | 134mm | 13% | — |
 | `10-23-2113-h1-curl-failure` | 7 | 72.3s | 89 | yes | 3.60 | 1.50 | 3.95 | 2.04 | 263mm | 18% | — |
+| `10-27-0910-f21-trunk-flexion-hole3` | 7 | 85.0s | 73 | yes | 4.88 | 1.59 | 4.94 | 1.10 | 207mm | 7% | — |
+| `10-27-0916-f21-trunk-flexion-hole2` | 7 | 82.8s | 71 | yes | 4.56 | 1.86 | 4.96 | 1.30 | 123mm | 15% | — |
 
-Five of twenty-one are refused. That is the app declining to put four tidy phase numbers on a
+Five of twenty-three are refused. That is the app declining to put four tidy phase numbers on a
 recording it cannot stand behind, which is the behaviour it was built for — not a failure rate.
 
 ## Two corrections this directory exists to prevent
@@ -100,6 +104,35 @@ them, which is why the files are now here under their own timestamps.
   08:17:00, 08:17:37 and 08:17:42 — all byte-identical. One copy had been kept separately as a
   "bicep" set and treated as independent evidence. There is no separate bicep recording from
   that morning; there is one recording, counted once here.
+
+## The pin pair, and what it settles
+
+The two recordings of 27 October are the only controlled travel comparison here. One machine,
+one lifter, one mount, six minutes apart, same prescribed tempo — the only thing changed was
+the range-limiting pin, hole 3 then hole 2. Everything else in this directory varies the
+machine or the day along with the stroke, so nothing else isolates stroke length.
+
+**It settles whether short travel costs you turnarounds: it does not.** The restricted set,
+at 123mm, holds three turnarounds at 2.0s exactly — dead on prescription — and runs straight
+through three others, which the app reports as no pause at all:
+
+| rep | 1 | 2 | 3 | 4 | 5 | 6 | 7 |
+|---|---|---|---|---|---|---|---|
+| hold at top | none | none | 1.4s | 2.0s | 2.0s | none | 2.0s |
+
+A reading that could not resolve a turnaround at 123mm could not have resolved those three.
+So the missing ones are missing because they were not held. This is a stronger argument than
+the corpus-wide one, which only shows that the sets with the most missing turnarounds are also
+the ones with the longest strokes — the seated row loses 65% of its turnarounds at 254mm,
+while the 263mm curl of 23 October loses none.
+
+The pair also makes a prediction worth testing. 207mm at hole 3 and 123mm at hole 2 is 84mm of
+carrier travel per hole, so **hole 4 should read about 291mm** — a 40% step, far larger than
+anything the reading's scatter could produce. It is not a clean test on its own, because it
+assumes the holes are evenly spaced and the linkage linear; a miss would not say which of the
+three assumptions failed. Running the hard-stop excursion at each hole, with a tape, converts
+it into one: the pin is the hard stop for its setting, so three settings give three known
+distances spanning better than 2:1 on a single machine.
 
 ## What is still missing
 
