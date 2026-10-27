@@ -53,6 +53,8 @@ neighbouring row. In particular:
 | `2026-10-23-2113-h1-curl-failure` | H1 Curl, both arms | **Muscular failure.** The final rep was **a failed rep** — the coach confirmed they could not complete the range, rather than it being an exit aid or setting the stack down. It reads 109mm up and 103mm down against a 266mm median. Whether the mount differed from the 16 October curl set is not recalled |
 | `2026-10-27-0910-f21-trunk-flexion-hole3` | F2.1 Trunk Flexion | Range-limiting pin at **hole 3**. One of a pair recorded six minutes apart on one machine, differing only in the pin |
 | `2026-10-27-0916-f21-trunk-flexion-hole2` | F2.1 Trunk Flexion | Range-limiting pin at **hole 2**, the restricted setting. The pair with the set above |
+| `2026-10-27-0926-f21-trunk-flexion-unlabelled` | F2.1 Trunk Flexion | **Purpose not recorded.** Not reps and not a hard-stop excursion — strokes climb 166 → 169 → 227 → 317 → 381mm through the recording. Refused |
+| `2026-10-27-0929-f21-trunk-flexion-unlabelled` | F2.1 Trunk Flexion | **Purpose not recorded.** Four irregular strokes, 45–231mm. Refused |
 
 ## Baseline, build 23 October 2026
 
@@ -87,8 +89,10 @@ row is the thing most worth catching.
 | `10-23-2113-h1-curl-failure` | 7 | 72.3s | 89 | yes | 3.60 | 1.50 | 3.95 | 2.04 | 263mm | 18% | — |
 | `10-27-0910-f21-trunk-flexion-hole3` | 7 | 85.0s | 73 | yes | 4.88 | 1.59 | 4.94 | 1.10 | 207mm | 7% | — |
 | `10-27-0916-f21-trunk-flexion-hole2` | 7 | 82.8s | 71 | yes | 4.56 | 1.86 | 4.96 | 1.30 | 123mm | 15% | — |
+| `10-27-0926-f21-trunk-flexion-unlabelled` | 3 | 35.6s | 50 | **NO** | 4.24 | 2.99 | 4.87 | 1.14 | 217mm | 51% | stroke travel varied by 51% |
+| `10-27-0929-f21-trunk-flexion-unlabelled` | 4 | 39.0s | 57 | **NO** | 3.16 | 1.41 | 4.06 | 1.23 | 158mm | 30% | stroke travel varied by 30% |
 
-Five of twenty-three are refused. That is the app declining to put four tidy phase numbers on a
+Seven of twenty-five are refused. That is the app declining to put four tidy phase numbers on a
 recording it cannot stand behind, which is the behaviour it was built for — not a failure rate.
 
 ## Two corrections this directory exists to prevent
@@ -133,6 +137,28 @@ assumes the holes are evenly spaced and the linkage linear; a miss would not say
 three assumptions failed. Running the hard-stop excursion at each hole, with a tape, converts
 it into one: the pin is the hard stop for its setting, so three settings give three known
 distances spanning better than 2:1 on a single machine.
+
+## A claim withdrawn: nothing here shows a stroke to be impossible
+
+The October F2.1 recording contains a 431mm stroke against a 195mm median, and that was
+written up — in a commit message and in conversation — as "an impossible 431mm stroke",
+offered as the clearest case for wanting a machine ceiling.
+
+It should not have been. **Calling a reading impossible requires knowing what the machine can
+travel, and that has never been measured on any machine here.** What the 431mm figure actually
+showed was a stroke far out of step with the rest of its own set, which is what the stroke-spread
+check already catches, and which is why that set is refused. The refusal was right. The reason
+given for it was not, and "impossible" claimed a measurement that does not exist.
+
+A second observation made it worth re-reading. The unlabelled recording of 27 October 09:26
+reads a 381mm stroke on the same machine. That recording is refused too, so 381mm is not a
+trustworthy distance either — it cannot establish a ceiling any more than 431mm could refute
+one. But two refused recordings reading 381mm and 431mm on a machine whose travel nobody has
+measured is not a basis for calling either one impossible.
+
+The ceiling check is still worth building, and `maxStackTravelMm` is still the measurement that
+would make it possible. Until that field holds a number, every stroke in this directory is
+judged only against the other strokes beside it.
 
 ## What is still missing
 
