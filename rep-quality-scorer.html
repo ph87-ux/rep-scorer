@@ -129,6 +129,25 @@
   body.set-running .ring-wrap { max-width:290px; }
   body.ring-off #ringSvg { opacity:.14; }
 
+  /* While a set is running, Stop is pinned to the bottom of the screen rather than sitting in
+     the scroll. The phone is clamped to the stack and the client reaches over for it at the end
+     of a set without studying the screen, so where it is must not depend on where the page
+     happened to be scrolled when the set started - and it did. It sits near the top of the
+     column, so scrolling DOWN during setup pushes it off the TOP: on a 375x553 screen with the
+     debug panel open and the page scrolled to the bottom, 17px of a 50px button was left
+     showing. Fixed placement makes it the same reach every time, on every handset.
+
+     Sized to the column rather than the screen so it lines up with everything above it, and
+     held clear of the iOS home indicator. The wrap gains matching bottom padding so the last
+     panel can still be scrolled out from under it. */
+  body.set-running #stopSetBtn {
+    position:fixed; z-index:60; width:auto;
+    left:max(16px, calc(50vw - 224px)); right:max(16px, calc(50vw - 224px));
+    bottom:calc(14px + env(safe-area-inset-bottom, 0px));
+    box-shadow:0 8px 28px rgba(0,0,0,.28);
+  }
+  body.set-running .wrap { padding-bottom:calc(92px + env(safe-area-inset-bottom, 0px)); }
+
   .ring-toggle { display:flex; align-items:flex-start; gap:12px; cursor:pointer; }
   .ring-toggle input { width:22px; height:22px; accent-color:var(--blue); margin:1px 0 0; flex:none; }
   .ring-toggle b { font-size:15px; font-weight:600; display:block; }
@@ -212,7 +231,7 @@
 
   <header>
     <div>
-      <div class="brand">Prototype · velocity engine · build 20 Oct 10:30 UTC</div>
+      <div class="brand">Prototype · velocity engine · build 27 Oct 09:08 UTC</div>
       <h1>Rep Quality Scorer</h1>
     </div>
     <div class="status-row">
