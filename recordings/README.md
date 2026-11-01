@@ -55,44 +55,58 @@ neighbouring row. In particular:
 | `2026-10-27-0916-f21-trunk-flexion-hole2` | F2.1 Trunk Flexion | Range-limiting pin at **hole 2**, the restricted setting. The pair with the set above |
 | `2026-10-27-0926-f21-trunk-flexion-unlabelled` | F2.1 Trunk Flexion | **Purpose not recorded.** Not reps and not a hard-stop excursion — strokes climb 166 → 169 → 227 → 317 → 381mm through the recording. Refused |
 | `2026-10-27-0929-f21-trunk-flexion-unlabelled` | F2.1 Trunk Flexion | **Purpose not recorded.** Four irregular strokes, 45–231mm. Refused |
+| `2026-10-30-2221-f21-trunk-flexion-hole3` | F2.1 Trunk Flexion | Range-limiting pin at **hole 3**. Nothing else recorded. Refused: reads 66mm per rep against 206mm for hole 3 on 27 October, and the trace is dominated by a 20Hz ringing that decays over 1-2s after each knock — the mount, not the lifting |
+| `2026-10-30-2228-b1-leg-extension` | B1 Leg Extension | The coach's words: **getting "crap scores for really decent form"**, and long holds at the loaded ends being penalised. Scored 80 on the 8 October build and 65 on 27 October; the drop traced to scoring changes, not the lift. This is the set the 1 November hold change was made for |
 
-## Baseline, build 23 October 2026
+## Baseline, build 1 November 2026
 
-What the current build makes of each one, with **no machine selected**, at a 4-2-4-2 target.
-No machine selected means both holds are judged in both directions; picking a machine whose
-ends are LOADED makes a long hold free and lifts the score a point or two. Phase figures are
-mean seconds. Regenerate this table whenever the segmentation changes — a silent shift in any
-row is the thing most worth catching.
+What the current build makes of each one, with **no machine selected**, at a 4-2-4-2 target and
+the form's default allowances. With no machine selected a long hold is now free at both ends;
+only an end a machine marks REST is judged on the long side, so picking such a machine can
+lower a score. Phase figures are mean seconds. Regenerate this table whenever the
+segmentation changes — a silent shift in any row is the thing most worth catching.
+
+The 1 November build changed three things, and every row moved because of the first:
+holds now begin when the stack is nearly still (10% of typical peak speed, was 5%), the hold
+allowance is 25% (was 15% in the form), and a long hold costs nothing unless the machine marks
+that end REST. Holds read 0.1-0.5s longer and strokes correspondingly shorter. The deliberately
+bad control moves 26 → 29; the good sets of 6 and 20 October move into the 83-94 range.
+
+One refusal is lost by the change and should not be read as a pass:
+`10-27-0929-f21-trunk-flexion-unlabelled` sat on the 30% stroke-spread line and now falls just
+under it. It is four irregular strokes of unknown purpose, as labelled above.
 
 | Recording | Reps | TUT | Score | Trusted | Lift | Top | Lower | Btm | Travel | Spread | Refused for |
 |---|---|---|---|---|---|---|---|---|---|---|---|
-| `10-04-0141-trial` | 4 | 34.4s | 68 | yes | 2.65 | 1.69 | 2.93 | 1.78 | 288mm | 12% | — |
-| `10-05-1151-unlabelled` | 8 | 94.3s | 71 | yes | 4.54 | 1.14 | 5.08 | 1.34 | 174mm | 7% | — |
-| `10-05-2021-unlabelled` | 8 | 92.7s | 74 | yes | 4.42 | 2.20 | 4.59 | 1.33 | 257mm | 16% | — |
-| `10-06-0425-matched-1` | 6 | 70.4s | 80 | yes | 3.93 | 2.00 | 4.58 | 1.46 | 263mm | 12% | — |
-| `10-06-0427-matched-2` | 7 | 76.4s | 75 | yes | 3.94 | 2.11 | 4.50 | 1.22 | 239mm | 13% | — |
-| `10-06-0430-matched-3` | 8 | 92.6s | 80 | yes | 4.06 | 1.99 | 4.39 | 1.29 | 258mm | 7% | — |
-| `10-06-0431-deliberately-bad` | 10 | 61.6s | 26 | yes | 2.38 | 0.38 | 2.54 | 1.66 | 237mm | 25% | — |
-| `10-06-0751-g5-neck-extension` | 4 | 52.5s | 37 | **NO** | 2.19 | 1.92 | 3.18 | 1.15 | 17mm | 26% | stack moved only 19mm per rep |
-| `10-06-0755-b6-leg-press-fast` | 3 | 89.5s | 45 | **NO** | 8.19 | 1.19 | 12.06 | 1.67 | 211mm | 13% | lift/lower travel disagree by 24%; 1 merged phase |
-| `10-06-0817-c7-row` | 9 | 69.3s | 42 | yes | 2.50 | 1.50 | 3.52 | — | 254mm | 16% | — |
-| `10-08-2024-f21-trunk-flexion` | 11 | 61.1s | 23 | **NO** | 2.77 | 0.33 | 2.54 | 0.95 | 181mm | 37% | stroke travel varied by 37% |
-| `10-08-2028-pulldown-light` | 9 | 66.0s | 42 | yes | 2.92 | 0.87 | 3.72 | 0.76 | 262mm | 9% | — |
-| `10-08-2030-pulldown-light` | 3 | 35.3s | 91 | yes | 3.53 | 2.36 | 4.48 | 2.01 | 259mm | 10% | — |
-| `10-16-2109-c3-pulldown-loaded` | 10 | 91.0s | 54 | yes | 3.60 | 0.96 | 4.94 | 0.97 | 236mm | 11% | — (reads as near failure) |
-| `10-16-2119-h1-curl` | 6 | 65.4s | 38 | **NO** | 2.82 | 1.25 | 5.03 | 0.83 | 139mm | 87% | stroke travel varied by 87%; lift/lower disagree by 24% |
-| `10-20-0851-clock-paced-1` | 9 | 103.1s | 68 | yes | 4.46 | 1.31 | 5.03 | 1.01 | 139mm | 19% | — |
-| `10-20-0855-clock-paced-2` | 9 | 99.8s | 70 | yes | 4.77 | 1.42 | 4.53 | 0.88 | 152mm | 5% | — |
-| `10-20-0858-clock-paced-3-failure` | 10 | 107.6s | 47 | **NO** | 4.53 | 0.87 | 4.20 | 1.69 | 183mm | 44% | stroke travel varied by 44% (the setup, see above) |
-| `10-20-0911-clock-paced-4` | 7 | 74.6s | 78 | yes | 3.76 | 1.63 | 4.30 | 1.34 | 256mm | 9% | — |
-| `10-20-0917-clock-paced-5` | 7 | 77.6s | 71 | yes | 4.71 | 1.16 | 4.33 | 2.17 | 134mm | 13% | — |
-| `10-23-2113-h1-curl-failure` | 7 | 72.3s | 89 | yes | 3.60 | 1.50 | 3.95 | 2.04 | 263mm | 18% | — |
-| `10-27-0910-f21-trunk-flexion-hole3` | 7 | 85.0s | 73 | yes | 4.88 | 1.59 | 4.94 | 1.10 | 207mm | 7% | — |
-| `10-27-0916-f21-trunk-flexion-hole2` | 7 | 82.8s | 71 | yes | 4.56 | 1.86 | 4.96 | 1.30 | 123mm | 15% | — |
-| `10-27-0926-f21-trunk-flexion-unlabelled` | 3 | 35.6s | 50 | **NO** | 4.24 | 2.99 | 4.87 | 1.14 | 217mm | 51% | stroke travel varied by 51% |
-| `10-27-0929-f21-trunk-flexion-unlabelled` | 4 | 39.0s | 57 | **NO** | 3.16 | 1.41 | 4.06 | 1.23 | 158mm | 30% | stroke travel varied by 30% |
+| `10-04-0141-trial` | 4 | 33.8s | 68 | yes | 2.32 | 1.87 | 2.79 | 1.96 | 285mm | 13% | — |
+| `10-05-1151-unlabelled` | 8 | 93.7s | 86 | yes | 4.47 | 1.31 | 4.60 | 1.37 | 172mm | 22% | — |
+| `10-05-2021-unlabelled` | 8 | 92.4s | 83 | yes | 4.09 | 2.29 | 4.27 | 1.65 | 257mm | 16% | — |
+| `10-06-0425-matched-1` | 6 | 70.2s | 94 | yes | 3.63 | 2.43 | 4.17 | 1.76 | 260mm | 12% | — |
+| `10-06-0427-matched-2` | 7 | 76.4s | 83 | yes | 3.55 | 2.57 | 4.32 | 1.46 | 238mm | 13% | — |
+| `10-06-0430-matched-3` | 8 | 92.3s | 93 | yes | 3.75 | 2.42 | 4.00 | 1.57 | 256mm | 8% | — |
+| `10-06-0431-deliberately-bad` | 10 | 61.4s | 29 | yes | 2.18 | 0.53 | 2.30 | 1.83 | 234mm | 25% | — |
+| `10-06-0751-g5-neck-extension` | 4 | 52.5s | 44 | **NO** | 2.18 | 1.92 | 3.17 | 1.16 | 17mm | 26% | stack moved only 19mm per rep |
+| `10-06-0755-b6-leg-press-fast` | 3 | 88.6s | 67 | **NO** | 7.61 | 1.23 | 11.53 | 2.30 | 209mm | 14% | concentric and eccentric travel disagree by 25%; 1 merged phase(s) |
+| `10-06-0817-c7-row` | 9 | 69.3s | 44 | yes | 2.33 | 1.41 | 3.19 | 0.42 | 254mm | 16% | — |
+| `10-08-2024-f21-trunk-flexion` | 11 | 61.0s | 21 | **NO** | 2.50 | 0.46 | 2.46 | 0.76 | 169mm | 38% | stroke travel varied by 38% |
+| `10-08-2028-pulldown-light` | 9 | 65.6s | 49 | yes | 2.82 | 0.97 | 3.38 | 0.73 | 261mm | 10% | — |
+| `10-08-2030-pulldown-light` | 4 | 45.5s | 93 | yes | 3.27 | 2.53 | 4.16 | 2.23 | 258mm | 9% | — |
+| `10-16-2109-c3-pulldown-loaded` | 10 | 91.0s | 59 | yes | 3.34 | 0.97 | 4.63 | 0.94 | 232mm | 14% | — |
+| `10-16-2119-h1-curl` | 6 | 65.3s | 65 | **NO** | 3.65 | 1.51 | 4.78 | 1.10 | 196mm | 81% | stroke travel varied by 81% |
+| `10-20-0851-clock-paced-1` | 9 | 102.8s | 89 | yes | 4.15 | 1.72 | 4.68 | 1.34 | 139mm | 18% | — |
+| `10-20-0855-clock-paced-2` | 9 | 99.6s | 87 | yes | 4.50 | 1.64 | 4.22 | 1.15 | 152mm | 4% | — |
+| `10-20-0858-clock-paced-3-failure` | 10 | 107.6s | 55 | **NO** | 4.34 | 0.72 | 4.11 | 2.20 | 178mm | 44% | stroke travel varied by 44% |
+| `10-20-0911-clock-paced-4` | 7 | 74.6s | 90 | yes | 3.48 | 1.91 | 4.01 | 1.65 | 255mm | 9% | — |
+| `10-20-0917-clock-paced-5` | 7 | 77.3s | 90 | yes | 4.29 | 1.33 | 3.85 | 2.44 | 134mm | 11% | — |
+| `10-23-2113-h1-curl-failure` | 7 | 71.5s | 88 | yes | 3.22 | 1.83 | 3.67 | 2.23 | 259mm | 19% | — |
+| `10-27-0910-f21-trunk-flexion-hole3` | 7 | 84.1s | 90 | yes | 4.62 | 1.64 | 4.60 | 1.35 | 206mm | 6% | — |
+| `10-27-0916-f21-trunk-flexion-hole2` | 7 | 82.3s | 85 | yes | 3.98 | 1.99 | 4.49 | 1.66 | 121mm | 14% | — |
+| `10-27-0926-f21-trunk-flexion-unlabelled` | 3 | 29.6s | 65 | **NO** | 3.91 | 3.25 | 2.66 | 1.27 | 179mm | 41% | stroke travel varied by 41%; concentric and eccentric travel disagree by 36% |
+| `10-27-0929-f21-trunk-flexion-unlabelled` | 4 | 39.0s | 64 | yes | 2.78 | 1.66 | 3.80 | 1.39 | 156mm | 30% | — |
+| `10-30-2221-f21-trunk-flexion-hole3` | 8 | 81.9s | 44 | **NO** | 2.57 | 1.37 | 2.92 | 1.26 | 95mm | 127% | stack moved only 66mm per rep; stroke travel varied by 127%; concentric and eccentric travel disagree by 27% |
+| `10-30-2228-b1-leg-extension` | 7 | 77.6s | 86 | yes | 4.54 | 1.94 | 4.22 | 1.16 | 276mm | 21% | — |
 
-Seven of twenty-five are refused. That is the app declining to put four tidy phase numbers on a
+Eight of twenty-seven are refused. That is the app declining to put four tidy phase numbers on a
 recording it cannot stand behind, which is the behaviour it was built for — not a failure rate.
 
 ## Two corrections this directory exists to prevent
