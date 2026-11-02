@@ -5,7 +5,8 @@
   "rules": {
     "LOADED": "The hold is work. Scored one-sided, like a contraction: cutting it short deducts, holding longer than target is free and keeps full marks. Decided deliberately — a client holding 6s against a 2s target scores 100, and a set can run long without costing quality marks as long as nothing is rushed. Accepted because the muscle is under load throughout.",
     "REST": "The hold is dead time. Scored both ways: cutting it short deducts, and so does running long, since tension is off and the extra seconds are rest rather than work.",
-    "shortAlwaysDeducts": "Cutting any hold short deducts, on every machine and at both ends. The classification only decides whether running LONG costs anything."
+    "shortAlwaysDeducts": "Cutting any hold short deducts, on every machine and at both ends. The classification only decides whether running LONG costs anything.",
+    "topStop": "HARD: the concentric ends against a range-limiting stop (a pin or the lever's own end of range). Coached as met gently and paused into, not struck. It does not change the hold rule: the stop only prevents travel further into the concentric, and the load still pulls the other way, so a client who relaxed against it would lose the position and the stack would drop — the top stays LOADED. Recorded and shown with the set; nothing is scored differently on it yet. Struck rather than met, the stop sets the phone cradle ringing at about 20Hz, and on the F2.1 set of 30 October that ringing came at the top of nearly every rep and the recording could not be read. Absent means no stop is known at that end."
   },
   "positions": {
     "top": "Stack raised. Always the end of the concentric and the muscle at its shortest, whichever way the client's limb travelled.",
@@ -29,8 +30,9 @@
       "bottomHold": "LOADED",
       "maxStackTravelMm": null,
       "targetTempo": null,
-      "notes": "Legs driven apart against the pads. Nothing skeletal can take over at full abduction: relax and the stack pulls the legs back together, so the top is LOADED. Bottom is LOADED by the coached-hover policy. Worked with both legs.",
-      "needsConfirmation": false
+      "notes": "Legs driven apart against the pads. Nothing skeletal can take over at full abduction: relax and the stack pulls the legs back together, so the top is LOADED. Bottom is LOADED by the coached-hover policy. Worked with both legs. Confirmed by the coach on 2 November: the concentric ends at a hard stop, met gently and paused into.",
+      "needsConfirmation": false,
+      "topStop": "HARD"
     },
     {
       "code": "A4",
@@ -39,8 +41,9 @@
       "bottomHold": "LOADED",
       "maxStackTravelMm": null,
       "targetTempo": null,
-      "notes": "Legs squeezed together against the pads. Confirmed by the coach on 24 October: the top is LOADED. The load pulls the legs apart, so a relaxed client loses the position and the stack drops. The lever does not reach a hard stop before the legs meet, which was the one way this could have been REST. Bottom is LOADED by the coached-hover policy. Worked with both legs.",
-      "needsConfirmation": false
+      "notes": "Legs squeezed together against the pads. Confirmed by the coach on 24 October: the top is LOADED. The load pulls the legs apart, so a relaxed client loses the position and the stack drops. On 2 November the coach said A4 does end at a hard stop, met gently and paused into. That does not make the top REST: the stop limits travel inward, the load still pulls the legs apart, and a relaxed client still loses the position. The earlier note here said the lever does not reach a hard stop before the legs meet; the coach's later statement replaces it. Bottom is LOADED by the coached-hover policy. Worked with both legs.",
+      "needsConfirmation": false,
+      "topStop": "HARD"
     },
     {
       "code": "B1",
@@ -239,9 +242,10 @@
       "bottomHold": "LOADED",
       "maxStackTravelMm": null,
       "targetTempo": null,
-      "notes": "Single joint through the spine, rotation rather than flexion, so it is classified with F2.1 and the other single-joint machines: no position where a limb can lock out, so the top is LOADED. The bottom was the doubtful one — a rotation machine can have a pad or a stop at square that takes the load, which would make it REST, and F2.1's confirmation was about a seat back on a flexion machine and did not carry across. Confirmed by the coach on 16 October as LOADED at both ends, so the hover policy stands here too and either end may be held as long as the client likes. Worked one side at a time, and left and right are recorded separately because rotation to each side is different work and averaging them would hide the asymmetry that is the point of measuring it.",
+      "notes": "Single joint through the spine, rotation rather than flexion, so it is classified with F2.1 and the other single-joint machines: no position where a limb can lock out, so the top is LOADED. The bottom was the doubtful one — a rotation machine can have a pad or a stop at square that takes the load, which would make it REST, and F2.1's confirmation was about a seat back on a flexion machine and did not carry across. Confirmed by the coach on 16 October as LOADED at both ends, so the hover policy stands here too and either end may be held as long as the client likes. Worked one side at a time, and left and right are recorded separately because rotation to each side is different work and averaging them would hide the asymmetry that is the point of measuring it. Confirmed by the coach on 2 November: the concentric ends at a hard stop, met gently and paused into.",
       "needsConfirmation": false,
-      "unilateral": true
+      "unilateral": true,
+      "topStop": "HARD"
     },
     {
       "code": "F2.1",
@@ -250,8 +254,9 @@
       "bottomHold": "LOADED",
       "maxStackTravelMm": null,
       "targetTempo": null,
-      "notes": "Single joint through the spine, no position where a limb can lock out, so the top hold is LOADED by the same reasoning as the other single-joint machines. The START position was the doubtful one: on some trunk flexion machines the client sits back against the frame at full extension and the stack rests there, which would shed the load and make the bottom REST. Confirmed by the coach on 16 October that the stack would drop if the client relaxed at the upright start, so the bottom is LOADED too and both ends may be held as long as the client likes. A set recorded on this machine on 8 October ran 20 of 23 turnarounds with no pause at all, so neither hold has yet been observed held.",
-      "needsConfirmation": false
+      "notes": "Single joint through the spine, no position where a limb can lock out, so the top hold is LOADED by the same reasoning as the other single-joint machines. The START position was the doubtful one: on some trunk flexion machines the client sits back against the frame at full extension and the stack rests there, which would shed the load and make the bottom REST. Confirmed by the coach on 16 October that the stack would drop if the client relaxed at the upright start, so the bottom is LOADED too and both ends may be held as long as the client likes. A set recorded on this machine on 8 October ran 20 of 23 turnarounds with no pause at all, so neither hold has yet been observed held. Confirmed by the coach on 2 November: the concentric ends at a hard stop, met gently and paused into.",
+      "needsConfirmation": false,
+      "topStop": "HARD"
     },
     {
       "code": "G1",

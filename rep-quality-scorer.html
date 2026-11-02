@@ -231,7 +231,7 @@
 
   <header>
     <div>
-      <div class="brand">Prototype · velocity engine · build 1 Nov 03:40 UTC</div>
+      <div class="brand">Prototype · velocity engine · build 2 Nov 11:45 UTC</div>
       <h1>Rep Quality Scorer</h1>
     </div>
     <div class="status-row">
@@ -1648,8 +1648,8 @@ function coachingFor(slots) {
   // fields the app actually reads are copied.
   const MACHINES_BUILTIN = [
     {code:'A1', name:"Hip Extension", topHold:'LOADED', bottomHold:'LOADED'},
-    {code:'A3', name:"Hip Abduction", topHold:'LOADED', bottomHold:'LOADED'},
-    {code:'A4', name:"Hip Adduction", topHold:'LOADED', bottomHold:'LOADED'},
+    {code:'A3', name:"Hip Abduction", topHold:'LOADED', bottomHold:'LOADED', topStop:'HARD'},
+    {code:'A4', name:"Hip Adduction", topHold:'LOADED', bottomHold:'LOADED', topStop:'HARD'},
     {code:'B1', name:"Leg Extension", topHold:'LOADED', bottomHold:'LOADED', unilateral:true},
     {code:'B5', name:"Leg Curl", topHold:'LOADED', bottomHold:'LOADED'},
     {code:'B7', name:"Leg Curl (seated)", topHold:'LOADED', bottomHold:'LOADED', unilateral:true},
@@ -1668,8 +1668,8 @@ function coachingFor(slots) {
     {code:'C3', name:"Pulldown", topHold:'LOADED', bottomHold:'LOADED', unilateral:true},
     {code:'C2', name:"Torso Arm (supinated grip)", topHold:'LOADED', bottomHold:'LOADED', unilateral:true},
     {code:'C5', name:"Torso Row", topHold:'LOADED', bottomHold:'LOADED'},
-    {code:'F1.1', name:"Trunk Rotation", topHold:'LOADED', bottomHold:'LOADED', unilateral:true},
-    {code:'F2.1', name:"Trunk Flexion", topHold:'LOADED', bottomHold:'LOADED'},
+    {code:'F1.1', name:"Trunk Rotation", topHold:'LOADED', bottomHold:'LOADED', topStop:'HARD', unilateral:true},
+    {code:'F2.1', name:"Trunk Flexion", topHold:'LOADED', bottomHold:'LOADED', topStop:'HARD'},
     {code:'G1', name:"Shrug", topHold:'LOADED', bottomHold:'LOADED'},
     {code:'G5', name:"Neck Extension", topHold:'LOADED', bottomHold:'LOADED'},
     {code:'H1', name:"Curl", topHold:'LOADED', bottomHold:'LOADED', unilateral:true}
@@ -1874,7 +1874,10 @@ function coachingFor(slots) {
       machineCode: $('machineIn').value || null,
       side: $('sideIn').value || null,
       holdTop: mach ? mach.topHold : null,
-      holdBtm: mach ? mach.bottomHold : null
+      holdBtm: mach ? mach.bottomHold : null,
+      // HARD: the concentric ends against a range-limiting stop, met gently and paused into.
+      // Recorded and shown; nothing is scored differently on it yet.
+      stopTop: mach ? (mach.topStop || null) : null
     };
   }
   // An allowance field left blank falls back to the figure that phase used before it was
@@ -2065,7 +2068,7 @@ function coachingFor(slots) {
         // skeleton has the load. LOADED, or no machine chosen: holding longer is free. Until
         // 1 November no machine chosen meant judged both ways; the coach asked that a long
         // hold never be penalised unless the load is known to be off the muscle.
-        longGrace: t.holdTop === 'REST' ? t.gTop : null, hold: t.holdTop },
+        longGrace: t.holdTop === 'REST' ? t.gTop : null, hold: t.holdTop, stop: t.stopTop },
       { label: 'Eccentric',  sub: 'stack lowering',key: 'eccentric',   target: t.ecc,  pause: false, travelKey: 'eccTravel', weight: t.wEcc, grace: t.gEcc, slow: eccSlow,
         // Set only where the waiver actually changed something: with no slow side configured
         // there was nothing to waive, and saying so would claim a leniency that is not there.
@@ -2204,6 +2207,7 @@ function coachingFor(slots) {
         + (s.n > 1 ? ' · spread ±' + s.sd.toFixed(1) + 's' : '')
         + (s.hold === 'REST' ? ' · rest, judged both ways'
            : s.hold === 'LOADED' ? ' · loaded, holding longer is free' : ' · holding longer is free')
+        + (s.stop === 'HARD' ? ' · pauses against a hard stop' : '')
         + (s.slowWaived ? ' · slow side waived, set reads as near failure' : '')
         + (weightOf(s) !== 1 ? ' · weight ×' + weightOf(s) : '')
         + (s.skipped ? ' · ' + s.skipped + ' with no pause at all' : '')
@@ -3119,7 +3123,7 @@ function coachingFor(slots) {
       // Which rulebook entry was applied, so a score can be reproduced. null means none was.
       // side is null on a bilateral set and on a machine that cannot be worked one side at a
       // time. Left and right are different work and are kept apart rather than averaged.
-      holdRule: { machine: t.machineCode, side: t.side, top: t.holdTop, bottom: t.holdBtm },
+      holdRule: { machine: t.machineCode, side: t.side, top: t.holdTop, bottom: t.holdBtm, topStop: t.stopTop },
       measured: {
         reps: res.reps.length,
         timeUnderTensionSeconds: res.tut !== null ? +res.tut.toFixed(1) : null,
